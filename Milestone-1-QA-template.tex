@@ -128,7 +128,7 @@ Implement $p_{u,i}$ using Spark RDDs. Your distributed implementation should giv
 \begin{itemize}    
         \item [\textbf{N.1}] \textit{Implement the k-NN predictor. Do not include self-similarity in the k-nearest neighbours. Using $k=10$,  \texttt{data/ml-100k/u2.base} for training output the similarities between: (1) user $1$ and itself; (2) user $1$ and user $864$; (3) user $1$ and user $886$. Still using $k=10$, output the prediction for user 1 and item 1 ($p_{1,1}$), and make sure that you obtain an MAE of $0.8287 \pm 0.0001$ on \texttt{data/ml-100k/u2.test}.} 
     
-    \item [\textbf{N.2}] \textit{Report the MAE on \texttt{data/ml-100k/u2.test} for $k = {10, 30, 50, 100, 200, 300, 400, 800, 942}$. What is the lowest $k$ such that the MAE is lower than for the baseline (non-personalized) method?} 
+    \item [\textbf{N.2}] \textit{Report the MAE on \texttt{data/ml-100k/u2.test} for $k = {10, 30, 50, 100, 200, 300, 400, 800, 943}$. What is the lowest $k$ such that the MAE is lower than for the baseline (non-personalized) method?} 
     
      \item [\textbf{N.3}] \label{q-total-time} \textit{Measure the time required for computing predictions (without using Spark) on \texttt{data/ml-100k/u2.test}. Include the time to train the predictor on \newline \texttt{data/ml-100k/u2.base} including computing the similarities $s_{u,v}$ and using $k=300$. Try reducing the computation time with alternative implementation techniques (making sure you keep obtaining the same results). Mention in your report which alternatives you tried,  which ones were fastest, and by how much. The teams with the correct answer and shortest times on a secret test set will obtain more points on this question.}
 \end{itemize}
