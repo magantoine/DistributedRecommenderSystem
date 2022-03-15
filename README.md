@@ -123,6 +123,8 @@ On ````ml-25m````:
 
 You can vary the number of executors used locally by using ````local[X]```` with X being an integer representing the number of cores you want to use locally.
 
+You can vary the number of executors on the cluster by disabling dynamic allocation with ````--conf "spark.dynamicAllocation.enabled=false"````, using ````--master yarn````, and setting the number of executors with ````--num-executors X````.
+
 ### Personalized
 
 ````

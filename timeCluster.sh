@@ -11,6 +11,6 @@ source ./config.sh
 echo "------------------- DISTRIBUTED ---------------------" >> $LOGS
 sbt assembly
 # 1 Executor
-spark-submit --class distributed.DistributedBaseline --master $SPARKMASTER --num-executors 1 target/scala-2.11/m1_yourid-assembly-1.0.jar  --train $ML25Mr2train --test $ML25Mr2test --separator , --json $RUN/distributed-25m-1.json --num_measurements 3 2>&1 >>$LOGS
+spark-submit --class distributed.DistributedBaseline --master $SPARKMASTER --num-executors 1 --conf "spark.dynamicAllocation.enabled=false" target/scala-2.11/m1_yourid-assembly-1.0.jar  --train $ML25Mr2train --test $ML25Mr2test --separator , --json $RUN/distributed-25m-1.json --num_measurements 3 2>&1 >>$LOGS
 # 4 Executors
-spark-submit --class distributed.DistributedBaseline --master $SPARKMASTER --num-executors 4 target/scala-2.11/m1_yourid-assembly-1.0.jar  --train $ML25Mr2train --test $ML25Mr2test --separator , --json $RUN/distributed-25m-4.json --num_measurements 3 2>&1 >>$LOGS
+spark-submit --class distributed.DistributedBaseline --master $SPARKMASTER --num-executors 4 --conf "spark.dynamicAllocation.enabled=false" target/scala-2.11/m1_yourid-assembly-1.0.jar  --train $ML25Mr2train --test $ML25Mr2test --separator , --json $RUN/distributed-25m-4.json --num_measurements 3 2>&1 >>$LOGS
