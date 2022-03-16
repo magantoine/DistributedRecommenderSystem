@@ -8,14 +8,16 @@ RUN=./logs/run-$(date "+%Y-%m-%d-%H:%M:%S")-$(hostname)
 mkdir -p $RUN
 LOGS=$RUN/log.txt
 source ./config.sh 
-echo "------------------- BASELINE    ---------------------" >> $LOGS
-sbt "runMain predict.Baseline --train $ML100Ku2base --test $ML100Ku2test --json $RUN/baseline-100k.json" 2>&1 >>$LOGS
-echo "------------------- DISTRIBUTED ---------------------" >> $LOGS
-sbt "runMain predict.Baseline --train $ML25Mr2train --test $ML25Mr2test --separator , --json $RUN/baseline-25m.json" 2>&1 >>$LOGS
-sbt "runMain distributed.DistributedBaseline --train $ML25Mr2train --test $ML25Mr2test --separator , --json $RUN/distributed-25m-4.json --master $SPARKMASTER" 2>&1 >>$LOGS
-echo "------------------- PERSONALIZED --------------------" >> $LOGS
-sbt "runMain predict.Personalized --train $ML100Ku2base --test $ML100Ku2test --json $RUN/personalized-100k.json" 2>&1 >>$LOGS
-echo "------------------- KNN -----------------------------" >> $LOGS
-sbt "runMain predict.kNN --train $ML100Ku2base --test $ML100Ku2test --json $RUN/knn-100k.json" 2>&1 >>$LOGS
-echo "------------------- RECOMMEND -----------------------" >> $LOGS
-sbt "runMain recommend.Recommender --data $ML100Kudata --personal data/personal.csv --json $RUN/recommender-100k.json" 2>&1 >>$LOGS
+echo "------------------- OPTIMIZING    ---------------------" >> $LOGS
+sbt "runMain scaling.Optimizing --train $ML100Ku2base --test $ML100Ku2test --json $RUN/optimizing-100k.json --users 943 --movies 1682" 2>&1 >>$LOGS
+echo "------------------- DISTRIBUTED EXACT ---------------------" >> $LOGS
+sbt "runMain distributed.Exact --train $ML100Ku2base --test $ML100Ku2test --json $RUN/exact-100k-4.json --k 10 --master local[4] --users 943 --movies 1682" 2>&1 >>$LOGS
+sbt "runMain distributed.Exact --train $ML1Mrbtrain --test $ML1Mrbtest --separator :: --json $RUN/exact-1m-4.json --k 300 --master local[4] --users 6040 --movies 3952" 2>&1 >>$LOGS
+echo "------------------- DISTRIBUTED APPROXIMATE ---------------------" >> $LOGS
+sbt "runMain distributed.Approximate --train $ML100Ku2base --test $ML100Ku2test --json $RUN/approximate-100k-4-k10-r2.json --k 10 --master local[4] --users 943 --movies 1682 --partitions 10 --replication 2" 2>&1 >>$LOGS;
+for R in 1 2 3 4 6 8; do
+    sbt "runMain distributed.Approximate --train $ML100Ku2base --test $ML100Ku2test --json $RUN/approximate-100k-4-k300-r$R.json --k 300 --master local[4] --users 943 --movies 1682 --partitions 10 --replication $R" 2>&1 >>$LOGS;
+done
+sbt "runMain distributed.Approximate --train $ML1Mrbtrain --test $ML1Mrbtest --separator :: --json $RUN/approximate-1m-4.json --k 300 --master local[4] --users 6040 --movies 3952 --partitions 8 --replication 1" 2>&1 >>$LOGS
+echo "------------------- ECONOMICS -----------------------------------" >> $LOGS
+sbt "runMain economics.Economics --json $RUN/economics.json" 2>&1 >>$LOGS
