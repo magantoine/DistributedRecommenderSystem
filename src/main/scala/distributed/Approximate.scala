@@ -54,8 +54,8 @@ object Approximate {
     val conf_k = conf.k()
 
     println("Loading training data")
-    val train = load(conf.train(), conf.separator(), conf.users(), conf.movies())
-    val test = load(conf.test(), conf.separator(), conf.users(), conf.movies())
+    val train = loadSpark(sc, conf.train(), conf.separator(), conf.users(), conf.movies())
+    val test = loadSpark(sc, conf.test(), conf.separator(), conf.users(), conf.movies())
     var knn : CSCMatrix[Double] = null
 
     println("Partitioning users")

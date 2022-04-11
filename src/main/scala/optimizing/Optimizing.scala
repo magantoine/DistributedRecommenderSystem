@@ -6,6 +6,10 @@ import scala.collection.mutable.ArrayBuffer
 import ujson._
 import shared.predictions._
 
+import org.apache.spark.sql.SparkSession
+import org.apache.log4j.Logger
+import org.apache.log4j.Level
+
 package scaling {
 
 class Conf(arguments: Seq[String]) extends ScallopConf(arguments) {
@@ -15,6 +19,7 @@ class Conf(arguments: Seq[String]) extends ScallopConf(arguments) {
   val users = opt[Int]()
   val movies = opt[Int]()
   val separator = opt[String](default=Some("\t"))
+  val master = opt[String]()
   val num_measurements = opt[Int](default=Some(1))
   verify()
 }
@@ -25,10 +30,20 @@ object Optimizing extends App {
     // will be serialized with the parallelize implementations
     val conf_users = conf.users()
     val conf_movies = conf.movies()
+    
+    // Remove these lines if encountering/debugging Spark
+    Logger.getLogger("org").setLevel(Level.OFF)
+    Logger.getLogger("akka").setLevel(Level.OFF)
+    val spark = conf.master.toOption match {
+      case None => SparkSession.builder().getOrCreate();
+      case Some(master) => SparkSession.builder().master(master).getOrCreate();
+    }
+    spark.sparkContext.setLogLevel("ERROR")
+    val sc = spark.sparkContext
 
     println("Loading training data from: " + conf.train())
-    val train = load(conf.train(), conf.separator(), conf.users(), conf.movies())
-    val test = load(conf.test(), conf.separator(), conf.users(), conf.movies())
+    val train = loadSpark(sc, conf.train(), conf.separator(), conf.users(), conf.movies())
+    val test = loadSpark(sc, conf.test(), conf.separator(), conf.users(), conf.movies())
 
     val measurements = (1 to conf.num_measurements()).map(x => timingInMs(() => {
       0.0
@@ -53,6 +68,7 @@ object Optimizing extends App {
             "test" -> ujson.Str(conf.test()),
             "users" -> ujson.Num(conf.users()),
             "movies" -> ujson.Num(conf.movies()),
+            "master" -> ujson.Str(conf.master()),
             "num_measurements" -> ujson.Num(conf.num_measurements())
           ),
           "BR.1" -> ujson.Obj(

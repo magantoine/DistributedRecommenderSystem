@@ -52,8 +52,8 @@ object Exact {
     val conf_k = conf.k()
 
     println("Loading training data from: " + conf.train())
-    val train = load(conf.train(), conf.separator(), conf.users(), conf.movies())
-    val test = load(conf.test(), conf.separator(), conf.users(), conf.movies())
+    val train = loadSpark(sc, conf.train(), conf.separator(), conf.users(), conf.movies())
+    val test = loadSpark(sc, conf.test(), conf.separator(), conf.users(), conf.movies())
 
     val measurements = (1 to scala.math.max(1,conf.num_measurements())).map(_ => timingInMs( () => {
       0.0

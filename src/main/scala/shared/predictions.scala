@@ -51,6 +51,34 @@ package object predictions
     builder.result()
   }
 
+  def loadSpark(sc : org.apache.spark.SparkContext,  path : String, sep : String, nbUsers : Int, nbMovies : Int) : CSCMatrix[Double] = {
+    val file = sc.textFile(path)
+    val ratings = file
+      .map(l => {
+        val cols = l.split(sep).map(_.trim)
+        toInt(cols(0)) match {
+          case Some(_) => Some(((cols(0).toInt-1, cols(1).toInt-1), cols(2).toDouble))
+          case None => None
+        }
+      })
+      .filter({ case Some(_) => true
+                 case None => false })
+      .map({ case Some(x) => x
+             case None => ((-1, -1), -1) }).collect()
+
+    val builder = new CSCMatrix.Builder[Double](rows=nbUsers, cols=nbMovies)
+    for ((k,v) <- ratings) {
+      v match {
+        case d: Double => {
+          val u = k._1
+          val i = k._2
+          builder.add(u, i, d)
+        }
+      }
+    }
+    return builder.result
+  }
+
   def partitionUsers (nbUsers : Int, nbPartitions : Int, replication : Int) : Seq[Set[Int]] = {
     val r = new scala.util.Random(1337)
     val bins : Map[Int, collection.mutable.ListBuffer[Int]] = (0 to (nbPartitions-1))
