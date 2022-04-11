@@ -41,6 +41,9 @@ class OptimizingTests extends AnyFunSuite with BeforeAndAfterAll {
      // Prediction user 1 and item 1
      assert(within(1.0, 0.0, 0.0001))
 
+     // Prediction user 327 and item 2
+     assert(within(1.0, 0.0, 0.0001))
+
      // MAE on test2
      assert(within(1.0, 0.0, 0.0001)) 
    } 

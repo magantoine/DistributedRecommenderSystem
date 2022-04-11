@@ -76,7 +76,8 @@ object Optimizing extends App {
             "2.k10u1v864" -> ujson.Num(0.0),
             "3.k10u1v886" -> ujson.Num(0.0),
             "4.PredUser1Item1" -> ujson.Num(0.0),
-            "5.Mae" -> ujson.Num(0.0)
+            "5.PredUser327Item2" -> ujson.Num(0.0),
+            "6.Mae" -> ujson.Num(0.0)
           ),
           "BR.2" ->  ujson.Obj(
             "average (ms)" -> ujson.Num(mean(timings)), // Datatype of answer: Double

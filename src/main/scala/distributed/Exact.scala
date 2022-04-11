@@ -90,7 +90,8 @@ object Exact {
             "2.knn_u1v864" -> ujson.Num(0.0),
             "3.knn_u1v886" -> ujson.Num(0.0),
             "4.PredUser1Item1" -> ujson.Num(0.0),
-            "5.Mae" -> ujson.Num(measurements(0)._1)
+            "5.PredUser327Item2" -> ujson.Num(0.0),
+            "6.Mae" -> ujson.Num(0.0)
           ),
           "EK.2" ->  ujson.Obj(
             "average (ms)" -> ujson.Num(mean(timings)), // Datatype of answer: Double
