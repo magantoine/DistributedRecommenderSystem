@@ -136,13 +136,22 @@ before running on cluster.
 
 ### Run on Cluster
 
-See [config.sh](./config.sh) for HDFS paths to pre-uploaded train and test datasets to replace TRAIN and TEST with in the command in the example command below:
+See [config.sh](./config.sh) for HDFS paths to pre-uploaded train and test datasets to replace TRAIN and TEST, like in the example commands below:
  
+#### When using ML-100k
 ````
-spark-submit --class distributed.Exact --master yarn --conf "spark.dynamicAllocation.enabled=false" --num-executors 1 m2_yourid-assembly-1.0.jar --train TRAIN --test TEST
+spark-submit --class distributed.Exact --master yarn --conf "spark.dynamicAllocation.enabled=false" --num-executors 1 m2_yourid-assembly-1.0.jar --json exact-100k-1.json --train $ML100Ku2base --test $ML100Ku2test
+````
+#### When using ML-1m
+````
+spark-submit --class distributed.Exact --master yarn --conf "spark.dynamicAllocation.enabled=false" --num-executors 1 m2_yourid-assembly-1.0.jar --json exact-1m-1.json --train $ML1Mrbtrain --test $ML1Mrbtest --separator :: --k 300 --users 6040 --movies 4000
 ````
 
+In order to keep results obtained with different parameters in different .json files, simply modify the corresponding parameter ("--json") passed and the values. For instance, with ```--num-executors 4``` : ```--json exact-1m-4.json```.
+Note that when changing from ML-100k to ML-1M, the parameter ```--separator ::``` should be added, and the number of users and movies should be modified.
+
 ## Grading scripts
+
 
 We will use the following scripts to grade your submission:
 
