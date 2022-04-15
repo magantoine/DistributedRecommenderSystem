@@ -1,6 +1,6 @@
 # Milestone Description
 
-[To Be Released](./Milestone-2.pdf)
+[Milestone-2.pdf](./Milestone-2.pdf)
 
 Note: Section 'Updates' lists the updates since the original release of the Milestone.
 
