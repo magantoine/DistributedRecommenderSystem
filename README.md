@@ -173,7 +173,7 @@ Steps:
 
     1. Create a zip archive with all your code within  ````src/````, as well as your report: ````zip sciper1-sciper2.zip -r src/ report.pdf````
     2. Submit ````sciper1-sciper2.zip```` the TA for grading on
-       https://cs449-submissions.epfl.ch:8083/m1 using the passcode you have previously received by email.
+       https://cs449-submissions.epfl.ch:8083/m2 using the passcode you have previously received by email.
 
 # References
 
