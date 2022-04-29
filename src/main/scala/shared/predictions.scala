@@ -11,6 +11,61 @@ package object predictions
   // ------------------------ For template
   case class Rating(user: Int, item: Int, rating: Double)
 
+
+  type Dataset = List[Rating]
+  type RateMatrix = CSCMatrix[Rate]
+  type UserId = Int
+  type ItemId = Int 
+  type Rate = Double
+  type Predictor = (UserId, ItemId) => Rate
+
+
+  def numberOfUser(data : Dataset) : Int = {
+    return data.map(_.user).toSet.size
+  }
+
+  def numberOfItems(data : Dataset) : Int = {
+    return data.map(_.item).toSet.size
+  }
+
+
+  def shape(m : RateMatrix) : (Int, Int) = {
+    return (m.rows, m.cols)
+  }
+
+
+  def kNNPredictor(train : RateMatrix) : Predictor = {
+    // first we need to build the breeze matrix
+
+    //val rates = buildSparseMatrix(train)
+
+    // compute average rating per user
+    println(shape(train))
+    //val usersAverage = mean(train(::, *))
+    
+    // computing devs :
+    // var preScale = train - usersAverage
+    // preScale(I(preScale == 0)) = 1
+    // preScale(I(preScale > 0)) = -(usersAverage - 5)
+    // preScale(I(preScale < 0)) = usersAverage - 1
+    
+    // val ratingDevs = (train - usersAverage) / preScale
+
+    // val itemsDevs = mean(ratingDevs(::, *))
+    // itemsDevs.take(10).foreach(println)
+
+    // // computing similarities
+    // val r_tilds = ratingDevs / norm(ratingDevs(*, ::))
+    // r_tilds.take(10).foreach(println)
+    // // simple matrix multiplication in numpy @
+    // val sims = r_tilds * r_tilds 
+
+    // sims.take(10).foreach(println)
+
+    return (x, y) => 1
+
+  }
+
   def timingInMs(f : ()=>Double ) : (Double, Double) = {
     val start = System.nanoTime() 
     val output = f()
