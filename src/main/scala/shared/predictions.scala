@@ -74,6 +74,7 @@ package object predictions
     train.activeIterator.foreach({ case ((uId, iId), r) => {
       maskBuilder.add(uId, iId, 1)
     }})
+    
     val mask = maskBuilder.result()
     val userCounts = sumAlongAxis(mask,axis=1)
     val itemCounts = sumAlongAxis(mask,axis=0)

@@ -48,6 +48,7 @@ object Optimizing extends App {
 
     val (predictions, sims) = kNNPredictor(train, 10)
     println(s"The MAE for 10NN is: ${computeMAE(test, predictions)}")
+    
 
     
 
