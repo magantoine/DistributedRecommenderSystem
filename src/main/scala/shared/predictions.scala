@@ -78,10 +78,7 @@ package object predictions
     val userCounts = sumAlongAxis(mask,axis=1)
     val itemCounts = sumAlongAxis(mask,axis=0)
 
-
-
     // compute average rating per user
-
     val usersAverage = sumAlongAxis(train, axis=1) /:/ userCounts
 
 
