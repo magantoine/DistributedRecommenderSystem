@@ -14,3 +14,4 @@ logs/
 .vscode/
 metals.sbt
 **/*.bloop
+data/ml-1m
