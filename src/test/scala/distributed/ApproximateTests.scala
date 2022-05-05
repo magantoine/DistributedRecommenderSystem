@@ -27,6 +27,8 @@ class ApproximateTests extends AnyFunSuite with BeforeAndAfterAll {
      sc = spark.sparkContext
    }
 
+   beforeAll()
+
    // Provide tests to show how to call your code to do the following tasks.
    // Ensure you use the same function calls to produce the JSON outputs in
    // the corresponding application.
