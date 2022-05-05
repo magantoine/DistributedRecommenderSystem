@@ -4,8 +4,8 @@
         "test": "data/ml-100k/u2.test",
         "users": 943,
         "movies": 1682,
-        "master": "local[4]",
-        "num_measurements": 10
+        "master": "local[1]",
+        "num_measurements": 1
     },
     "BR.1": {
         "1.k10u1v1": 0,
@@ -16,7 +16,7 @@
         "6.Mae": 0.8287277961963542
     },
     "BR.2": {
-        "average (ms)": 2219.897593363636,
-        "stddev (ms)": 114.38700359190194
+        "average (ms)": 2180.012646,
+        "stddev (ms)": 50.152468
     }
 }

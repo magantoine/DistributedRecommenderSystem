@@ -19,6 +19,7 @@ package object predictions
   type Rate = Double
   type Predictor = (UserId, ItemId) => Rate
 
+// PART 1 BREEZE
 
   def numberOfUser(data : Dataset) : Int = {
     return data.map(_.user).toSet.size
@@ -169,6 +170,24 @@ package object predictions
     }, topKSims)
 
   }
+
+
+  // END OF PART 1
+
+
+  // PART 2 ///////////////////////////////////////////
+
+
+  def kNNPredictor(train : RateMatrix, k : Int) : (Predictor, RateMatrix) = { 
+
+
+    // precompute denomiantor shit, broadcast
+    // apply as usual the KNN algo
+  }
+
+
+
+    // END OF PART 2 ///////////////////////////////////////////
 
   def timingInMs(f : ()=>Double ) : (Double, Double) = {
     val start = System.nanoTime() 
