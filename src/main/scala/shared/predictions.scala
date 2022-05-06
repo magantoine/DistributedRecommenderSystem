@@ -46,6 +46,7 @@ package object predictions
         multiplicator.add(0, i, 1)
       }
     }
+
     return if(axis == 1) m * multiplicator.result() else multiplicator.result() * m
   }
 
@@ -69,61 +70,28 @@ package object predictions
   }
 
 
-  def preprocessedRatings(train:RateMatrix): RateMatrix = {
-
-    val nbUsers = train.rows
-    val nbItems = train.cols
-    var maskBuilder = new CSCMatrix.Builder[Rate](rows=nbUsers, cols=nbItems)
-    train.activeIterator.foreach({ case ((uId, iId), r) => {
-      maskBuilder.add(uId, iId, 1)
-    }})
-    
-    val mask = maskBuilder.result()
-    val userCounts = sumAlongAxis(mask,axis=1)
-    val itemCounts = sumAlongAxis(mask,axis=0)
-
-    // compute average rating per user
-    val usersAverage = sumAlongAxis(train, axis=1) /:/ userCounts
-
-
-    // compute the deviations r(u, i)^ = (r(u, i)  - ravg(u)) / scale(r(u, i), ravg(u))
-    var preScaleBuilder = new CSCMatrix.Builder[Rate](rows=nbUsers, cols=nbItems)
-    var cnt = 0.0
-    var sumOfRate = 0.0
-    train.activeIterator.foreach({ case ((uId, iId), r) => {
-      val uAverage = usersAverage(uId, 0)
-      val scaling = scale(r, uAverage)
-      preScaleBuilder.add(uId, iId, (r - uAverage) / scaling.toDouble)
-      cnt += 1
-      sumOfRate += r
-    }})
-    val devs = preScaleBuilder.result()
-
-    // compute the preprocessed ratings r~(u, i) = r(u, i)^ / sqrt(sum(all the items rated by one user r^(u, j) squared ))
-    val norms = sumAlongAxis(devs :* devs, axis=1)
-    var preprocRatingBuilder = new CSCMatrix.Builder[Rate](rows=nbUsers, cols=nbItems)
-    devs.activeIterator.foreach({case ((uId, iId), r) => {
-        preprocRatingBuilder.add(uId, iId, r / math.sqrt(norms(uId, 0)))
-    }})
-    val preprocRatings = preprocRatingBuilder.result()
-
-
-    return preprocRatings
-  }
-
   def kNNPredictor(train : RateMatrix, k : Int) : (Predictor, RateMatrix) = {
 
 
-    // !! please modify preProcessedRatings() accordingly if code below is modified !! \\ 
 
     val nbUsers = train.rows
     val nbItems = train.cols
     var maskBuilder = new CSCMatrix.Builder[Rate](rows=nbUsers, cols=nbItems)
+
+    var cnt = 0.0
+    var sumOfRate = 0.0
+
     train.activeIterator.foreach({ case ((uId, iId), r) => {
       maskBuilder.add(uId, iId, 1)
+      cnt += 1
+      sumOfRate += r
     }})
+
+    val globalAverage = sumOfRate / cnt
+
     
     val mask = maskBuilder.result()
+
     val userCounts = sumAlongAxis(mask,axis=1)
     val itemCounts = sumAlongAxis(mask,axis=0)
 
@@ -133,23 +101,24 @@ package object predictions
 
     // compute the deviations r(u, i)^ = (r(u, i)  - ravg(u)) / scale(r(u, i), ravg(u))
     var preScaleBuilder = new CSCMatrix.Builder[Rate](rows=nbUsers, cols=nbItems)
-    var cnt = 0.0
-    var sumOfRate = 0.0
+
     train.activeIterator.foreach({ case ((uId, iId), r) => {
       val uAverage = usersAverage(uId, 0)
       val scaling = scale(r, uAverage)
       preScaleBuilder.add(uId, iId, (r - uAverage) / scaling.toDouble)
-      cnt += 1
-      sumOfRate += r
+
     }})
     val devs = preScaleBuilder.result()
 
     // compute the preprocessed ratings r~(u, i) = r(u, i)^ / sqrt(sum(all the items rated by one user r^(u, j) squared ))
-    val norms = sumAlongAxis(devs :* devs, axis=1)
+    //val norms = sqrt(sumAlongAxis(devs :* devs, axis=1))
+    val norms = sqrt((devs *:* devs) * DenseVector.ones[Double](devs.cols))
+    
     var preprocRatingBuilder = new CSCMatrix.Builder[Rate](rows=nbUsers, cols=nbItems)
     devs.activeIterator.foreach({case ((uId, iId), r) => {
-        preprocRatingBuilder.add(uId, iId, r / math.sqrt(norms(uId, 0)))
+        preprocRatingBuilder.add(uId, iId, r / norms(uId))
     }})
+    
     val preprocRatings = preprocRatingBuilder.result()
 
     // compute the similarities, sum for all items j rated by both r~(u, j) * r~(v, j)
@@ -198,15 +167,13 @@ package object predictions
     })
     
     val predictions = predictionsBuilder.result()
-    val defaultValue = sumOfRate / cnt
-
     
     val itemAvgDev = (sumAlongAxis(devs, axis=0).t /:/ itemCounts.t).t
 
     return ((uId : UserId, iId : ItemId) => {
       val out = predictions(uId, iId)
       if(userCounts(uId, 0) == 0){
-        defaultValue
+        globalAverage
       } else {
         out
       }
