@@ -53,12 +53,13 @@ object Exact {
 
     println("Loading training data from: " + conf.train())
     val train = loadSpark(sc, conf.train(), conf.separator(), conf.users(), conf.movies())
+    println("Loading testing data from: " + conf.test())
     val test = loadSpark(sc, conf.test(), conf.separator(), conf.users(), conf.movies())
 
     //val train = loadSparkRDD(sc, conf.train(), conf.separator()).map({case ((uid,iid),rate) => Rating(uid,iid,rate)})
     //val test = loadSparkRDD(sc, conf.test(), conf.separator()).map({case ((uid,iid),rate) => Rating(uid,iid,rate)})
 
-
+    println("Creating KNN predictor ")
     val (predictions, sims) = SparkKNNPredictor(train, 10, sc)
 
     println(s"The MAE for 10NN is: ${computeMAE(test, predictions)}")
