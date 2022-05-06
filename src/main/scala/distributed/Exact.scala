@@ -55,10 +55,18 @@ object Exact {
     val train = loadSpark(sc, conf.train(), conf.separator(), conf.users(), conf.movies())
     val test = loadSpark(sc, conf.test(), conf.separator(), conf.users(), conf.movies())
 
-    val measurements = (1 to scala.math.max(1,conf.num_measurements())).map(_ => timingInMs( () => {
-      0.0
-    }))
-    val timings = measurements.map(_._2)
+    //val train = loadSparkRDD(sc, conf.train(), conf.separator()).map({case ((uid,iid),rate) => Rating(uid,iid,rate)})
+    //val test = loadSparkRDD(sc, conf.test(), conf.separator()).map({case ((uid,iid),rate) => Rating(uid,iid,rate)})
+
+
+    val (predictions, sims) = SparkKNNPredictor(train, 10, sc)
+
+    println(s"The MAE for 10NN is: ${computeMAE(test, predictions)}")
+
+    val timings = getTimings(() => {
+      val (predictor10, sims) = SparkKNNPredictor(train, 10, sc)
+      predictor10(1, 1)
+      }, conf.num_measurements())
 
     // Save answers as JSON
     def printToFile(content: String,
@@ -86,12 +94,12 @@ object Exact {
             "num_measurements" -> ujson.Num(conf.num_measurements())
           ),
           "EK.1" -> ujson.Obj(
-            "1.knn_u1v1" -> ujson.Num(0.0),
-            "2.knn_u1v864" -> ujson.Num(0.0),
-            "3.knn_u1v886" -> ujson.Num(0.0),
-            "4.PredUser1Item1" -> ujson.Num(0.0),
-            "5.PredUser327Item2" -> ujson.Num(0.0),
-            "6.Mae" -> ujson.Num(0.0)
+            "1.knn_u1v1" -> ujson.Num(sims(0,0)),
+            "2.knn_u1v864" -> ujson.Num(sims(0, 863)),
+            "3.knn_u1v886" -> ujson.Num(sims(0, 885)),
+            "4.PredUser1Item1" -> ujson.Num(predictions(0, 0)),
+            "5.PredUser327Item2" -> ujson.Num(predictions(326, 1)),
+            "6.Mae" -> ujson.Num(computeMAE(test, predictions))
           ),
           "EK.2" ->  ujson.Obj(
             "average (ms)" -> ujson.Num(mean(timings)), // Datatype of answer: Double

@@ -5,6 +5,7 @@ import breeze.numerics._
 import scala.io.Source
 import scala.collection.mutable.ArrayBuffer
 import org.apache.spark.SparkContext
+import org.apache.spark.rdd.RDD
 
 package object predictions
 {
@@ -67,7 +68,8 @@ package object predictions
     case x if x == userAvgRating => 1.0
   }
 
-  def kNNPredictor(train : RateMatrix, k : Int) : (Predictor, RateMatrix) = {
+
+  def preprocessedRatings(train:RateMatrix): RateMatrix = {
 
     val nbUsers = train.rows
     val nbItems = train.cols
@@ -97,8 +99,6 @@ package object predictions
     }})
     val devs = preScaleBuilder.result()
 
-    
-
     // compute the preprocessed ratings r~(u, i) = r(u, i)^ / sqrt(sum(all the items rated by one user r^(u, j) squared ))
     val norms = sumAlongAxis(devs :* devs, axis=1)
     var preprocRatingBuilder = new CSCMatrix.Builder[Rate](rows=nbUsers, cols=nbItems)
@@ -108,6 +108,49 @@ package object predictions
     val preprocRatings = preprocRatingBuilder.result()
 
 
+    return preprocRatings
+  }
+
+  def kNNPredictor(train : RateMatrix, k : Int) : (Predictor, RateMatrix) = {
+
+
+    // !! please modify preProcessedRatings() accordingly if code below is modified !! \\ 
+
+    val nbUsers = train.rows
+    val nbItems = train.cols
+    var maskBuilder = new CSCMatrix.Builder[Rate](rows=nbUsers, cols=nbItems)
+    train.activeIterator.foreach({ case ((uId, iId), r) => {
+      maskBuilder.add(uId, iId, 1)
+    }})
+    
+    val mask = maskBuilder.result()
+    val userCounts = sumAlongAxis(mask,axis=1)
+    val itemCounts = sumAlongAxis(mask,axis=0)
+
+    // compute average rating per user
+    val usersAverage = sumAlongAxis(train, axis=1) /:/ userCounts
+
+
+    // compute the deviations r(u, i)^ = (r(u, i)  - ravg(u)) / scale(r(u, i), ravg(u))
+    var preScaleBuilder = new CSCMatrix.Builder[Rate](rows=nbUsers, cols=nbItems)
+    var cnt = 0.0
+    var sumOfRate = 0.0
+    train.activeIterator.foreach({ case ((uId, iId), r) => {
+      val uAverage = usersAverage(uId, 0)
+      val scaling = scale(r, uAverage)
+      preScaleBuilder.add(uId, iId, (r - uAverage) / scaling.toDouble)
+      cnt += 1
+      sumOfRate += r
+    }})
+    val devs = preScaleBuilder.result()
+
+    // compute the preprocessed ratings r~(u, i) = r(u, i)^ / sqrt(sum(all the items rated by one user r^(u, j) squared ))
+    val norms = sumAlongAxis(devs :* devs, axis=1)
+    var preprocRatingBuilder = new CSCMatrix.Builder[Rate](rows=nbUsers, cols=nbItems)
+    devs.activeIterator.foreach({case ((uId, iId), r) => {
+        preprocRatingBuilder.add(uId, iId, r / math.sqrt(norms(uId, 0)))
+    }})
+    val preprocRatings = preprocRatingBuilder.result()
 
     // compute the similarities, sum for all items j rated by both r~(u, j) * r~(v, j)
     val sims = preprocRatings * preprocRatings.t
@@ -177,13 +220,119 @@ package object predictions
 
   // PART 2 ///////////////////////////////////////////
 
+    def fromSliceToDense(slice: SliceVector[(Int, Int), Double]): DenseVector[Double] = {
+        val dense = DenseVector.zeros[Double](slice.length)
+        slice.activeIterator.foreach({ case (i,v) => dense(i) = v})
+        return dense
+    }
 
-  def kNNPredictor(train : RateMatrix, k : Int) : (Predictor, RateMatrix) = { 
+
+  def SparkKNNPredictor(train : RateMatrix, k : Int, sc:SparkContext) : (Predictor, RateMatrix) = { 
 
 
-    // precompute denomiantor shit, broadcast
-    // apply as usual the KNN algo
+    val nbUsers = train.rows
+    val nbItems = train.cols
+    var maskBuilder = new CSCMatrix.Builder[Rate](rows=nbUsers, cols=nbItems)
+    train.activeIterator.foreach({ case ((uId, iId), r) => {
+      maskBuilder.add(uId, iId, 1)
+    }})
+    
+    val mask = maskBuilder.result()
+    val userCounts = sumAlongAxis(mask,axis=1)
+    val itemCounts = sumAlongAxis(mask,axis=0)
+
+    // compute average rating per user
+    val usersAverage = sumAlongAxis(train, axis=1) /:/ userCounts
+
+
+    // compute the deviations r(u, i)^ = (r(u, i)  - ravg(u)) / scale(r(u, i), ravg(u))
+    var preScaleBuilder = new CSCMatrix.Builder[Rate](rows=nbUsers, cols=nbItems)
+    var cnt = 0.0
+    var sumOfRate = 0.0
+    train.activeIterator.foreach({ case ((uId, iId), r) => {
+      val uAverage = usersAverage(uId, 0)
+      val scaling = scale(r, uAverage)
+      preScaleBuilder.add(uId, iId, (r - uAverage) / scaling.toDouble)
+      cnt += 1
+      sumOfRate += r
+    }})
+    val devs = preScaleBuilder.result()
+
+    // compute the preprocessed ratings r~(u, i) = r(u, i)^ / sqrt(sum(all the items rated by one user r^(u, j) squared ))
+    val norms = sumAlongAxis(devs :* devs, axis=1)
+    var preprocRatingBuilder = new CSCMatrix.Builder[Rate](rows=nbUsers, cols=nbItems)
+    devs.activeIterator.foreach({case ((uId, iId), r) => {
+        preprocRatingBuilder.add(uId, iId, r / math.sqrt(norms(uId, 0)))
+    }})
+    val preprocRatings = preprocRatingBuilder.result()
+
+    val broadcastPreprocRatings = sc.broadcast(preprocRatings)
+
+    def topK(k: Int, user: Int): (Int, IndexedSeq[(Int,Double)]) = {
+
+      val preProc = broadcastPreprocRatings.value
+      val userSlicePreProc = fromSliceToDense(preProc(user, 0 until nbItems).t)
+      val userSims = preProc * userSlicePreProc
+      userSims(user) = 0.0
+       return (user, argtopk(userSims, k).map(u2 => (u2, userSims(u2))))
   }
+    
+      val topKs = sc.parallelize(0 until nbUsers).map(u => topK(k, u)).collect()
+      val topKSimsBuilder = new CSCMatrix.Builder[Double](nbUsers, nbUsers) 
+      topKs.foreach({case (u, topSims) => topSims.foreach({case (v, sim) => topKSimsBuilder.add(u, v, sim)})})
+      val topKSims = topKSimsBuilder.result()
+
+    
+    // denoms : denoms(u, i) = sum for all the items v that rated i of |s(u, v)|
+    val denoms = abs(topKSims) * mask
+    val nums = topKSims * devs 
+
+
+    var userItemDevBuilder = new CSCMatrix.Builder[Rate](rows=nbUsers, cols=nbItems)
+
+    nums.activeIterator.foreach({case ((uId, iId), num) => {
+        userItemDevBuilder.add(uId, iId, num / denoms(uId, iId).toDouble)
+    }})
+
+    val userItemDevs = userItemDevBuilder.result()
+
+    val userItemPairs = for(uId <- 0 until train.rows; iId <- 0 until train.cols) yield (uId, iId)
+
+    
+    var predictionsBuilder = new CSCMatrix.Builder[Rate](rows=nbUsers, cols=nbItems)
+    
+    
+    userItemPairs.foreach({ case (uId, iId) => {
+      val uAverage = usersAverage(uId, 0)
+      val dev = userItemDevs(uId, iId)
+      val scaling = scale(dev + uAverage, uAverage)
+      predictionsBuilder.add(uId, iId, uAverage + dev * scaling)
+      }
+    })
+    
+    val predictions = predictionsBuilder.result()
+    val defaultValue = sumOfRate / cnt
+
+    
+    val itemAvgDev = (sumAlongAxis(devs, axis=0).t /:/ itemCounts.t).t
+
+    return ((uId : UserId, iId : ItemId) => {
+      val out = predictions(uId, iId)
+      if(userCounts(uId, 0) == 0){
+        defaultValue
+      } else {
+        out
+      }
+    }, topKSims)
+
+      
+
+
+  }
+
+
+
+
 
 
 
@@ -230,19 +379,7 @@ package object predictions
   }
 
   def loadSpark(sc : org.apache.spark.SparkContext,  path : String, sep : String, nbUsers : Int, nbMovies : Int) : CSCMatrix[Double] = {
-    val file = sc.textFile(path)
-    val ratings = file
-      .map(l => {
-        val cols = l.split(sep).map(_.trim)
-        toInt(cols(0)) match {
-          case Some(_) => Some(((cols(0).toInt-1, cols(1).toInt-1), cols(2).toDouble))
-          case None => None
-        }
-      })
-      .filter({ case Some(_) => true
-                 case None => false })
-      .map({ case Some(x) => x
-             case None => ((-1, -1), -1) }).collect()
+    val ratings = loadSparkRDD(sc, path,sep)collect()
 
     val builder = new CSCMatrix.Builder[Double](rows=nbUsers, cols=nbMovies)
     for ((k,v) <- ratings) {
@@ -255,6 +392,29 @@ package object predictions
       }
     }
     return builder.result
+  }
+
+
+  def loadSparkRDD(sc : org.apache.spark.SparkContext, path : String, sep : String): RDD[((Int,Int),Double)] = {
+
+
+    val file = sc.textFile(path)
+    val ratings = file
+      .map(l => {
+        val cols = l.split(sep).map(_.trim)
+        toInt(cols(0)) match {
+          case Some(_) => Some(((cols(0).toInt-1, cols(1).toInt-1), cols(2).toDouble))
+          case None => None
+        }
+      })
+      .filter({ case Some(_) => true
+                 case None => false })
+      .map({ case Some(x) => x
+             case None => ((-1, -1), -1.0) })
+
+      
+        return ratings
+
   }
 
   def partitionUsers (nbUsers : Int, nbPartitions : Int, replication : Int) : Seq[Set[Int]] = {
