@@ -278,6 +278,8 @@ package object predictions
   }
     
       val topKs = sc.parallelize(0 until nbUsers).map(u => topK(k, u)).collect()
+      // freeing memory
+      broadcastPreprocRatings.destroy()
       val topKSimsBuilder = new CSCMatrix.Builder[Double](nbUsers, nbUsers) 
       topKs.foreach({case (u, topSims) => topSims.foreach({case (v, sim) => topKSimsBuilder.add(u, v, sim)})})
       val topKSims = topKSimsBuilder.result()
