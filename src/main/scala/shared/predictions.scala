@@ -72,6 +72,125 @@ package object predictions
 
   def kNNPredictor(train : RateMatrix, k : Int) : (Predictor, RateMatrix) = {
 
+    val nbUsers = train.rows
+    val nbItems = train.cols
+    var maskBuilder = new CSCMatrix.Builder[Rate](rows=nbUsers, cols=nbItems)
+
+    var cnt = 0.0
+    var sumOfRate = 0.0
+
+    train.activeIterator.foreach({ case ((uId, iId), r) => {
+      maskBuilder.add(uId, iId, 1)
+      cnt += 1
+      sumOfRate += r
+    }})
+
+    val globalAverage = sumOfRate / cnt
+
+    
+    val mask = maskBuilder.result()
+
+    val userCounts = sumAlongAxis(mask,axis=1)
+
+    // compute average rating per user
+    val usersAverage = sumAlongAxis(train, axis=1) /:/ userCounts
+
+
+    // compute the deviations r(u, i)^ = (r(u, i)  - ravg(u)) / scale(r(u, i), ravg(u))
+    var preScaleBuilder = new CSCMatrix.Builder[Rate](rows=nbUsers, cols=nbItems)
+
+    train.activeIterator.foreach({ case ((uId, iId), r) => {
+      val uAverage = usersAverage(uId, 0)
+      val scaling = scale(r, uAverage)
+      preScaleBuilder.add(uId, iId, (r - uAverage) / scaling.toDouble)
+
+    }})
+    val devs = preScaleBuilder.result()
+
+    // compute the preprocessed ratings r~(u, i) = r(u, i)^ / sqrt(sum(all the items rated by one user r^(u, j) squared ))
+    //val norms = sqrt(sumAlongAxis(devs :* devs, axis=1))
+    val norms = sqrt((devs *:* devs) * DenseVector.ones[Double](devs.cols))
+    
+    var preprocRatingBuilder = new CSCMatrix.Builder[Rate](rows=nbUsers, cols=nbItems)
+    devs.activeIterator.foreach({case ((uId, iId), r) => {
+        preprocRatingBuilder.add(uId, iId, r / norms(uId))
+    }})
+    
+    val preprocRatings = preprocRatingBuilder.result()
+
+    // compute the similarities, sum for all items j rated by both r~(u, j) * r~(v, j)
+    val sims = preprocRatings * preprocRatings.t
+
+
+    // keep only the topKSims for each users
+    var topKSimsBuilder = new CSCMatrix.Builder[Rate](rows=nbUsers, cols=nbUsers)
+    val tops = argtopk(sims.toDense(::, *), k + 1)
+    for (uId <- 0 until nbUsers){
+      for (vId <- tops(uId)){
+          if(uId != vId) {
+            topKSimsBuilder.add(uId, vId, sims(uId, vId))
+          }
+      }
+    }
+
+    val topKSims = topKSimsBuilder.result()
+
+    // denoms : denoms(u, i) = sum for all the items v that rated i of |s(u, v)|
+    val denoms = abs(topKSims) * mask
+    val nums = topKSims * devs 
+
+    //val userItemDevs = nums /:/ denoms
+
+    
+    var userItemDevBuilder = new CSCMatrix.Builder[Rate](rows=nbUsers, cols=nbItems)
+    nums.activeIterator.foreach({case ((uId, iId), num) => {
+        userItemDevBuilder.add(uId, iId, num / denoms(uId, iId).toDouble)
+    }})
+
+    val userItemDevs = userItemDevBuilder.result()
+    val userItemPairs = for(uId <- 0 until train.rows; iId <- 0 until train.cols) yield (uId, iId)
+
+    
+    var predictionsBuilder = new CSCMatrix.Builder[Rate](rows=nbUsers, cols=nbItems)
+    
+    
+    userItemPairs.foreach({ case (uId, iId) => {
+      val uAverage = usersAverage(uId, 0)
+      val dev = userItemDevs(uId, iId)
+      val scaling = scale(dev + uAverage, uAverage)
+      predictionsBuilder.add(uId, iId, uAverage + dev * scaling)
+      }
+    })
+    
+    val predictions = predictionsBuilder.result()
+    
+    val itemCounts = sumAlongAxis(mask,axis=0)
+
+    return ((uId : UserId, iId : ItemId) => {
+      val out = predictions(uId, iId)
+      if(userCounts(uId, 0) == 0){
+        globalAverage
+      } else {
+        out
+      }
+    }, topKSims)
+
+  }
+
+
+  // END OF PART 1
+
+
+  // PART 2 ///////////////////////////////////////////
+
+    def fromSliceToDense(slice: SliceVector[(Int, Int), Double]): DenseVector[Double] = {
+        val dense = DenseVector.zeros[Double](slice.length)
+        slice.activeIterator.foreach({ case (i,v) => dense(i) = v})
+        return dense
+    }
+
+
+  def SparkKNNPredictor(train : RateMatrix, k : Int, sc:SparkContext) : (Predictor, RateMatrix) = { 
 
 
     val nbUsers = train.rows
@@ -121,117 +240,6 @@ package object predictions
     
     val preprocRatings = preprocRatingBuilder.result()
 
-    // compute the similarities, sum for all items j rated by both r~(u, j) * r~(v, j)
-    val sims = preprocRatings * preprocRatings.t
-
-
-    // keep only the topKSims for each users
-    var topKSimsBuilder = new CSCMatrix.Builder[Rate](rows=nbUsers, cols=nbUsers)
-    val tops = argtopk(sims.toDense(::, *), k + 1)
-    for (uId <- 0 until train.rows){
-      for (vId <- tops(uId)){
-          if(uId != vId) {
-            topKSimsBuilder.add(uId, vId, sims(uId, vId))
-          }
-      }
-    }
-
-    val topKSims = topKSimsBuilder.result()
-
-    
-    // denoms : denoms(u, i) = sum for all the items v that rated i of |s(u, v)|
-    val denoms = abs(topKSims) * mask
-    val nums = topKSims * devs 
-
-
-    
-    var userItemDevBuilder = new CSCMatrix.Builder[Rate](rows=nbUsers, cols=nbItems)
-    nums.activeIterator.foreach({case ((uId, iId), num) => {
-        userItemDevBuilder.add(uId, iId, num / denoms(uId, iId).toDouble)
-    }})
-
-    val userItemDevs = userItemDevBuilder.result()
-
-    val userItemPairs = for(uId <- 0 until train.rows; iId <- 0 until train.cols) yield (uId, iId)
-
-    
-    var predictionsBuilder = new CSCMatrix.Builder[Rate](rows=nbUsers, cols=nbItems)
-    
-    
-    userItemPairs.foreach({ case (uId, iId) => {
-      val uAverage = usersAverage(uId, 0)
-      val dev = userItemDevs(uId, iId)
-      val scaling = scale(dev + uAverage, uAverage)
-      predictionsBuilder.add(uId, iId, uAverage + dev * scaling)
-      }
-    })
-    
-    val predictions = predictionsBuilder.result()
-    
-    val itemAvgDev = (sumAlongAxis(devs, axis=0).t /:/ itemCounts.t).t
-
-    return ((uId : UserId, iId : ItemId) => {
-      val out = predictions(uId, iId)
-      if(userCounts(uId, 0) == 0){
-        globalAverage
-      } else {
-        out
-      }
-    }, topKSims)
-
-  }
-
-
-  // END OF PART 1
-
-
-  // PART 2 ///////////////////////////////////////////
-
-    def fromSliceToDense(slice: SliceVector[(Int, Int), Double]): DenseVector[Double] = {
-        val dense = DenseVector.zeros[Double](slice.length)
-        slice.activeIterator.foreach({ case (i,v) => dense(i) = v})
-        return dense
-    }
-
-
-  def SparkKNNPredictor(train : RateMatrix, k : Int, sc:SparkContext) : (Predictor, RateMatrix) = { 
-
-
-    val nbUsers = train.rows
-    val nbItems = train.cols
-    var maskBuilder = new CSCMatrix.Builder[Rate](rows=nbUsers, cols=nbItems)
-    train.activeIterator.foreach({ case ((uId, iId), r) => {
-      maskBuilder.add(uId, iId, 1)
-    }})
-    
-    val mask = maskBuilder.result()
-    val userCounts = sumAlongAxis(mask,axis=1)
-    val itemCounts = sumAlongAxis(mask,axis=0)
-
-    // compute average rating per user
-    val usersAverage = sumAlongAxis(train, axis=1) /:/ userCounts
-
-
-    // compute the deviations r(u, i)^ = (r(u, i)  - ravg(u)) / scale(r(u, i), ravg(u))
-    var preScaleBuilder = new CSCMatrix.Builder[Rate](rows=nbUsers, cols=nbItems)
-    var cnt = 0.0
-    var sumOfRate = 0.0
-    train.activeIterator.foreach({ case ((uId, iId), r) => {
-      val uAverage = usersAverage(uId, 0)
-      val scaling = scale(r, uAverage)
-      preScaleBuilder.add(uId, iId, (r - uAverage) / scaling.toDouble)
-      cnt += 1
-      sumOfRate += r
-    }})
-    val devs = preScaleBuilder.result()
-
-    // compute the preprocessed ratings r~(u, i) = r(u, i)^ / sqrt(sum(all the items rated by one user r^(u, j) squared ))
-    val norms = sumAlongAxis(devs :* devs, axis=1)
-    var preprocRatingBuilder = new CSCMatrix.Builder[Rate](rows=nbUsers, cols=nbItems)
-    devs.activeIterator.foreach({case ((uId, iId), r) => {
-        preprocRatingBuilder.add(uId, iId, r / math.sqrt(norms(uId, 0)))
-    }})
-    val preprocRatings = preprocRatingBuilder.result()
 
     val broadcastPreprocRatings = sc.broadcast(preprocRatings)
 
@@ -280,15 +288,11 @@ package object predictions
     })
     
     val predictions = predictionsBuilder.result()
-    val defaultValue = sumOfRate / cnt
-
     
-    val itemAvgDev = (sumAlongAxis(devs, axis=0).t /:/ itemCounts.t).t
-
     return ((uId : UserId, iId : ItemId) => {
       val out = predictions(uId, iId)
       if(userCounts(uId, 0) == 0){
-        defaultValue
+        globalAverage
       } else {
         out
       }

@@ -101,5 +101,6 @@ object Optimizing extends App {
     }
 
     println("")
+    spark.stop()
 } 
 }
