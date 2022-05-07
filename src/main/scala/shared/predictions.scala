@@ -187,7 +187,7 @@ package object predictions
     val nbUsers = train.rows
     val nbItems = train.cols
 
-    val itemRatings = train(0 until nbUsers, item).toDenseVector
+    val itemRatings = train(0 until nbUsers, item).toDenseVector.map(x=> if(x!= 0.0) 1.0  else 0.0) 
 
     val denom = abs(topKSims(user, 0 until nbUsers).t.toDenseVector) * itemRatings
     val num = devs(0 until nbUsers, item) * topKSims(user, 0 until nbUsers).t
@@ -203,18 +203,17 @@ package object predictions
 
     val nbUsers = train.rows
     val userItemAverageDev = computeUserItemAverageDev(user,item, train, topKSims, devs)
-    val itemRatings = train(0 until nbUsers, item).toDenseVector
-    val reduction_mask = SparseVector[Double](Array.tabulate(nbUsers){x=>1.0})
+    val itemRatings = train(0 until nbUsers, item).toDenseVector.map(x=> if(x!= 0.0) 1.0  else 0.0)
     val num_item_ratings = sum(itemRatings)
     val userAverage = usersAverage(user,0)
 
     if(userItemAverageDev == 0.0 || num_item_ratings == 0.0) return userAverage
     else{
-      val num_user_sims = sum(topKSims(user, 0 until nbUsers).t.toDenseVector)
+      val num_user_sims = sum(topKSims(user, 0 until nbUsers).t.toDenseVector.map(x=> if(x!= 0.0) 1.0  else 0.0))
       if (num_user_sims == 0.0) {return globalAverage}
 
       else {
-      println(s"User $user Item $item userAverage $userAverage userItemAverageDev  $userItemAverageDev num_item_ratings  $num_item_ratings")
+      // println(s"User $user Item $item userAverage $userAverage userItemAverageDev  $userItemAverageDev num_item_ratings  $num_item_ratings")
       return userAverage + userItemAverageDev* scale(userAverage + userItemAverageDev, userAverage)
     }
     }
@@ -246,8 +245,6 @@ package object predictions
     //    out
     //  }
     //}, topKSims)
-
-    val normalized_train = train.mapActiveValues((x=> 1.0))
 
     return ((uId : UserId, iId : ItemId) => predictKNN(uId, iId, train = train, topKSims = topKSims, usersAverage =  usersAverage, devs= devs, globalAverage ), topKSims)
 
