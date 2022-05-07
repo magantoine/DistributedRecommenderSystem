@@ -187,12 +187,16 @@ package object predictions
     val nbUsers = train.rows
     val nbItems = train.cols
 
+    
+
     val itemRatings = train(0 until nbUsers, item).toDenseVector.map(x=> if(x!= 0.0) 1.0  else 0.0) 
 
-    val denom = abs(topKSims(user, 0 until nbUsers).t.toDenseVector) * itemRatings
-    val num = devs(0 until nbUsers, item) * topKSims(user, 0 until nbUsers).t
+    val denom = itemRatings.t * abs(topKSims(user, 0 until nbUsers).t.toDenseVector)
+    val num =   topKSims(user, 0 until nbUsers) * devs(0 until nbUsers, item)
 
-    return if(denom(0) != 0.0 ) num(0) / denom(0) else 0.0
+    val res = if(denom != 0.0 ) num / denom else 0.0
+
+    return res
   }
 
 
@@ -224,6 +228,7 @@ package object predictions
     val (usersAverage, globalAverage) = globalAverageAndUsersAverage(train)
     val (preprocRatings,devs) = preprocessRatings(train,usersAverage)
     val topKSims = computeKTopSimilarites(preprocRatings,k)
+
     //val userItemDevs = userItemDeviations(train = train, devs = devs, topKSims =  topKSims)
     //val userItemPairs = for(uId <- 0 until train.rows; iId <- 0 until train.cols) yield (uId, iId)
     //var predictionsBuilder = new CSCMatrix.Builder[Rate](rows=nbUsers, cols=nbItems)  
@@ -246,6 +251,7 @@ package object predictions
     //  }
     //}, topKSims)
 
+
     return ((uId : UserId, iId : ItemId) => predictKNN(uId, iId, train = train, topKSims = topKSims, usersAverage =  usersAverage, devs= devs, globalAverage ), topKSims)
 
   }
@@ -263,7 +269,7 @@ package object predictions
     //}
 
 
-    def computeExactSimilarities(preprocRatings: CSCMatrix[Double], k:Int, sc: SparkContext): CSCMatrix[Double]  = {
+    def computeExactSparkSimilarities(preprocRatings: CSCMatrix[Double], k:Int, sc: SparkContext): CSCMatrix[Double]  = {
     val broadcastPreprocRatings = sc.broadcast(preprocRatings)
 
     val nbUsers = preprocRatings.rows
@@ -274,8 +280,8 @@ package object predictions
       val preProc = broadcastPreprocRatings.value
       val userSlicePreProc = preProc(user, 0 until nbItems).t.toDenseVector
       val userSims = preProc * userSlicePreProc
+      userSims(user) = 0.0
       val topSims = SparseVector.zeros[Double](nbUsers)
-      topSims(user) = 0.0
       for(v <- argtopk(userSims,k)){
         topSims(v) = userSims(v)
       }
@@ -283,7 +289,7 @@ package object predictions
       return topSims
   }
     
-      val topKs = sc.parallelize(0 until nbUsers).map(topK).collect()
+      val topKs = sc.parallelize(0 until nbUsers).map(u => topK(u)).collect()
       // freeing memory
       // broadcastPreprocRatings.destroy()
       val topKSimsBuilder = new CSCMatrix.Builder[Double](nbUsers, nbUsers) 
@@ -292,108 +298,21 @@ package object predictions
         val topSims = topKs(u)
 
         for((v, suv) <- topSims.activeIterator){
+
           topKSimsBuilder.add(u,v,suv)
         }
       }
 
-
-      val topKSims = topKSimsBuilder.result()
-
-      return topKSims
+      return topKSimsBuilder.result()
     }
 
   def SparkKNNPredictor(train : RateMatrix, k : Int, sc:SparkContext) : (Predictor, RateMatrix) = { 
 
+    val (usersAverage, globalAverage) = globalAverageAndUsersAverage(train)
+    val (preprocRatings,devs) = preprocessRatings(train,usersAverage)
+    val topKSims = computeExactSparkSimilarities(preprocRatings,k,sc)
 
-    val nbUsers = train.rows
-    val nbItems = train.cols
-    var maskBuilder = new CSCMatrix.Builder[Rate](rows=nbUsers, cols=nbItems)
-
-    var cnt = 0.0
-    var sumOfRate = 0.0
-
-    train.activeIterator.foreach({ case ((uId, iId), r) => {
-      maskBuilder.add(uId, iId, 1)
-      cnt += 1
-      sumOfRate += r
-    }})
-
-    val globalAverage = sumOfRate / cnt
-
-    
-    val mask = maskBuilder.result()
-
-    val userCounts = sumAlongAxis(mask,axis=1)
-    val itemCounts = sumAlongAxis(mask,axis=0)
-
-    // compute average rating per user
-    val usersAverage = sumAlongAxis(train, axis=1) /:/ userCounts
-
-
-    // compute the deviations r(u, i)^ = (r(u, i)  - ravg(u)) / scale(r(u, i), ravg(u))
-    var preScaleBuilder = new CSCMatrix.Builder[Rate](rows=nbUsers, cols=nbItems)
-
-    train.activeIterator.foreach({ case ((uId, iId), r) => {
-      val uAverage = usersAverage(uId, 0)
-      val scaling = scale(r, uAverage)
-      preScaleBuilder.add(uId, iId, (r - uAverage) / scaling.toDouble)
-
-    }})
-    val devs = preScaleBuilder.result()
-
-    // compute the preprocessed ratings r~(u, i) = r(u, i)^ / sqrt(sum(all the items rated by one user r^(u, j) squared ))
-    //val norms = sqrt(sumAlongAxis(devs :* devs, axis=1))
-    val norms = sqrt((devs *:* devs) * DenseVector.ones[Double](devs.cols))
-    
-    var preprocRatingBuilder = new CSCMatrix.Builder[Rate](rows=nbUsers, cols=nbItems)
-    devs.activeIterator.foreach({case ((uId, iId), r) => {
-        preprocRatingBuilder.add(uId, iId, r / norms(uId))
-    }})
-    
-    val preprocRatings = preprocRatingBuilder.result()
-
-    val topKSims = computeExactSimilarities(preprocRatings,k,sc)
-
-
-    
-    // denoms : denoms(u, i) = sum for all the items v that rated i of |s(u, v)|
-    val denoms = (abs(topKSims) * mask) 
-    val nums = topKSims * devs 
-
-    
-    var userItemDevBuilder = new CSCMatrix.Builder[Rate](rows=nbUsers, cols=nbItems)
-    nums.activeIterator.foreach({case ((uId, iId), num) => {
-        userItemDevBuilder.add(uId, iId, num / denoms(uId, iId).toDouble)
-    }})
-
-    val userItemDevs = userItemDevBuilder.result()
-    val userItemPairs = for(uId <- 0 until train.rows; iId <- 0 until train.cols) yield (uId, iId)
-
-    
-    var predictionsBuilder = new CSCMatrix.Builder[Rate](rows=nbUsers, cols=nbItems)
-    
-    
-    userItemPairs.foreach({ case (uId, iId) => {
-      val uAverage = usersAverage(uId, 0)
-      val dev = userItemDevs(uId, iId)
-      val scaling = scale(dev + uAverage, uAverage)
-      predictionsBuilder.add(uId, iId, uAverage + dev * scaling)
-      }
-    })
-    
-    val predictions = predictionsBuilder.result()
-    
-
-    return ((uId : UserId, iId : ItemId) => {
-      val out = predictions(uId, iId)
-      if(userCounts(uId, 0) == 0){
-        globalAverage
-      } else {
-        out
-      }
-    }, topKSims)
-      
-
+    return ((uId : UserId, iId : ItemId) => predictKNN(uId, iId, train = train, topKSims = topKSims, usersAverage =  usersAverage, devs= devs, globalAverage ), topKSims)
 
   }
 
