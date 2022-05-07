@@ -6,6 +6,7 @@ import scala.io.Source
 import scala.collection.mutable.ArrayBuffer
 import org.apache.spark.SparkContext
 import org.apache.spark.rdd.RDD
+import org.apache.spark.sql.catalyst.expressions.In
 
 package object predictions
 {
@@ -35,7 +36,7 @@ package object predictions
     return (m.rows, m.cols)
   }
 
-  def sumAlongAxis(m : RateMatrix, axis : Int) : RateMatrix = {
+  def sumAlongAxis(m : RateMatrix, axis : Int) : CSCMatrix[Double] = {
     var multiplicator =  if(axis == 1) new CSCMatrix.Builder[Double](rows=m.cols, cols=1) else new CSCMatrix.Builder[Double](rows=1, cols=m.rows) 
     if(axis == 1) {
       for (i <- 0 until m.cols){
@@ -70,8 +71,7 @@ package object predictions
   }
 
 
-  def kNNPredictor(train : RateMatrix, k : Int) : (Predictor, RateMatrix) = {
-
+  def globalAverageAndUsersAverage(train: CSCMatrix[Double]): (CSCMatrix[Double], Double) = {
     val nbUsers = train.rows
     val nbItems = train.cols
     var maskBuilder = new CSCMatrix.Builder[Rate](rows=nbUsers, cols=nbItems)
@@ -95,8 +95,16 @@ package object predictions
     // compute average rating per user
     val usersAverage = sumAlongAxis(train, axis=1) /:/ userCounts
 
+    return (usersAverage, globalAverage)
+  }
 
-    // compute the deviations r(u, i)^ = (r(u, i)  - ravg(u)) / scale(r(u, i), ravg(u))
+()
+  def preprocessRatings(train: CSCMatrix[Double], usersAverage: CSCMatrix[Double]): (CSCMatrix[Double], CSCMatrix[Double]) = {
+
+    val nbUsers = train.rows
+    val nbItems = train.cols
+
+        // compute the deviations r(u, i)^ = (r(u, i)  - ravg(u)) / scale(r(u, i), ravg(u))
     var preScaleBuilder = new CSCMatrix.Builder[Rate](rows=nbUsers, cols=nbItems)
 
     train.activeIterator.foreach({ case ((uId, iId), r) => {
@@ -118,6 +126,14 @@ package object predictions
     
     val preprocRatings = preprocRatingBuilder.result()
 
+    return (preprocRatings, devs)
+  }
+
+  def computeKTopSimilarites(preprocRatings:CSCMatrix[Double], k:Int): CSCMatrix[Double] = {
+
+    
+    val nbUsers = preprocRatings.rows
+    val nbItems = preprocRatings.cols
     // compute the similarities, sum for all items j rated by both r~(u, j) * r~(v, j)
     val sims = preprocRatings * preprocRatings.t
 
@@ -135,11 +151,25 @@ package object predictions
 
     val topKSims = topKSimsBuilder.result()
 
-    // denoms : denoms(u, i) = sum for all the items v that rated i of |s(u, v)|
-    val denoms = abs(topKSims) * mask
-    val nums = topKSims * devs 
+    return topKSims
+  }
 
-    //val userItemDevs = nums /:/ denoms
+
+  def userItemDeviations(train: CSCMatrix[Double], topKSims:CSCMatrix[Double], devs: CSCMatrix[Double] ): CSCMatrix[Double] = {
+
+    val nbUsers = train.rows
+    val nbItems = train.cols
+
+    var maskBuilder = new CSCMatrix.Builder[Rate](rows=nbUsers, cols=nbItems)
+
+    train.activeIterator.foreach({ case ((uId, iId), r) => {
+      maskBuilder.add(uId, iId, 1)
+    }})
+    
+    val mask = maskBuilder.result()
+
+    val denoms = (abs(topKSims) * mask) 
+    val nums = topKSims * devs 
 
     
     var userItemDevBuilder = new CSCMatrix.Builder[Rate](rows=nbUsers, cols=nbItems)
@@ -148,32 +178,78 @@ package object predictions
     }})
 
     val userItemDevs = userItemDevBuilder.result()
-    val userItemPairs = for(uId <- 0 until train.rows; iId <- 0 until train.cols) yield (uId, iId)
 
-    
-    var predictionsBuilder = new CSCMatrix.Builder[Rate](rows=nbUsers, cols=nbItems)
-    
-    
-    userItemPairs.foreach({ case (uId, iId) => {
-      val uAverage = usersAverage(uId, 0)
-      val dev = userItemDevs(uId, iId)
-      val scaling = scale(dev + uAverage, uAverage)
-      predictionsBuilder.add(uId, iId, uAverage + dev * scaling)
-      }
-    })
-    
-    val predictions = predictionsBuilder.result()
-    
-    val itemCounts = sumAlongAxis(mask,axis=0)
+    return userItemDevs
+  }
 
-    return ((uId : UserId, iId : ItemId) => {
-      val out = predictions(uId, iId)
-      if(userCounts(uId, 0) == 0){
-        globalAverage
-      } else {
-        out
-      }
-    }, topKSims)
+  def computeUserItemAverageDev(user: Int,item:Int, train: CSCMatrix[Double], topKSims:CSCMatrix[Double], devs:CSCMatrix[Double]): Double = {
+
+    val nbUsers = train.rows
+    val nbItems = train.cols
+
+    val itemRatings = train(0 until nbUsers, item).toDenseVector
+
+    val denom = abs(topKSims(user, 0 until nbUsers).t.toDenseVector) * itemRatings
+    val num = devs(0 until nbUsers, item) * topKSims(user, 0 until nbUsers).t
+
+    return if(denom(0) != 0.0 ) num(0) / denom(0) else 0.0
+  }
+
+
+  
+
+  def predictKNN(user:Int, item:Int, train:CSCMatrix[Double], topKSims: CSCMatrix[Double], 
+  usersAverage: CSCMatrix[Double], devs: CSCMatrix[Double], globalAverage:Double): Double = {
+
+    val nbUsers = train.rows
+    val userItemAverageDev = computeUserItemAverageDev(user,item, train, topKSims, devs)
+    val itemRatings = train(0 until nbUsers, item).toDenseVector
+    val reduction_mask = SparseVector[Double](Array.tabulate(nbUsers){x=>1.0})
+    val num_item_ratings = sum(itemRatings)
+    val userAverage = usersAverage(user,0)
+
+    if(userItemAverageDev == 0.0 || num_item_ratings == 0.0) return userAverage
+    else{
+      val num_user_sims = sum(topKSims(user, 0 until nbUsers).t.toDenseVector)
+      if (num_user_sims == 0.0) {return globalAverage}
+
+      else {
+      println(s"User $user Item $item userAverage $userAverage userItemAverageDev  $userItemAverageDev num_item_ratings  $num_item_ratings")
+      return userAverage + userItemAverageDev* scale(userAverage + userItemAverageDev, userAverage)
+    }
+    }
+  }
+
+  def kNNPredictor(train : RateMatrix, k : Int) : (Predictor, RateMatrix) = {
+
+    val (usersAverage, globalAverage) = globalAverageAndUsersAverage(train)
+    val (preprocRatings,devs) = preprocessRatings(train,usersAverage)
+    val topKSims = computeKTopSimilarites(preprocRatings,k)
+    //val userItemDevs = userItemDeviations(train = train, devs = devs, topKSims =  topKSims)
+    //val userItemPairs = for(uId <- 0 until train.rows; iId <- 0 until train.cols) yield (uId, iId)
+    //var predictionsBuilder = new CSCMatrix.Builder[Rate](rows=nbUsers, cols=nbItems)  
+    //userItemPairs.foreach({ case (uId, iId) => {
+    //  val uAverage = usersAverage(uId, 0)
+    //  val dev = userItemDevs(uId, iId)
+    //  val scaling = scale(dev + uAverage, uAverage)
+    //  predictionsBuilder.add(uId, iId, uAverage + dev * scaling)
+    //  }
+    //})
+    //
+    //val predictions = predictionsBuilder.result()
+  //
+    //return ((uId : UserId, iId : ItemId) => {
+    //  val out = predictions(uId, iId)
+    //  if(userCounts(uId, 0) == 0){
+    //    globalAverage
+    //  } else {
+    //    out
+    //  }
+    //}, topKSims)
+
+    val normalized_train = train.mapActiveValues((x=> 1.0))
+
+    return ((uId : UserId, iId : ItemId) => predictKNN(uId, iId, train = train, topKSims = topKSims, usersAverage =  usersAverage, devs= devs, globalAverage ), topKSims)
 
   }
 
@@ -183,12 +259,51 @@ package object predictions
 
   // PART 2 ///////////////////////////////////////////
 
-    def fromSliceToDense(slice: SliceVector[(Int, Int), Double]): DenseVector[Double] = {
-        val dense = DenseVector.zeros[Double](slice.length)
-        slice.activeIterator.foreach({ case (i,v) => dense(i) = v})
-        return dense
-    }
+    //def fromSliceToDense(slice: SliceVector[(Int, Int), Double]): DenseVector[Double] = {
+    //    val dense = DenseVector.zeros[Double](slice.length)
+    //    slice.activeIterator.foreach({ case (i,v) => dense(i) = v})
+    //    return dense
+    //}
 
+
+    def computeExactSimilarities(preprocRatings: CSCMatrix[Double], k:Int, sc: SparkContext): CSCMatrix[Double]  = {
+    val broadcastPreprocRatings = sc.broadcast(preprocRatings)
+
+    val nbUsers = preprocRatings.rows
+    val nbItems = preprocRatings.cols
+
+    def topK(user: Int): SparseVector[Double] = {
+
+      val preProc = broadcastPreprocRatings.value
+      val userSlicePreProc = preProc(user, 0 until nbItems).t.toDenseVector
+      val userSims = preProc * userSlicePreProc
+      val topSims = SparseVector.zeros[Double](nbUsers)
+      topSims(user) = 0.0
+      for(v <- argtopk(userSims,k)){
+        topSims(v) = userSims(v)
+      }
+
+      return topSims
+  }
+    
+      val topKs = sc.parallelize(0 until nbUsers).map(topK).collect()
+      // freeing memory
+      // broadcastPreprocRatings.destroy()
+      val topKSimsBuilder = new CSCMatrix.Builder[Double](nbUsers, nbUsers) 
+      
+      for(u <- 0 until nbUsers){
+        val topSims = topKs(u)
+
+        for((v, suv) <- topSims.activeIterator){
+          topKSimsBuilder.add(u,v,suv)
+        }
+      }
+
+
+      val topKSims = topKSimsBuilder.result()
+
+      return topKSims
+    }
 
   def SparkKNNPredictor(train : RateMatrix, k : Int, sc:SparkContext) : (Predictor, RateMatrix) = { 
 
@@ -240,39 +355,21 @@ package object predictions
     
     val preprocRatings = preprocRatingBuilder.result()
 
+    val topKSims = computeExactSimilarities(preprocRatings,k,sc)
 
-    val broadcastPreprocRatings = sc.broadcast(preprocRatings)
-
-    def topK(k: Int, user: Int): (Int, IndexedSeq[(Int,Double)]) = {
-
-      val preProc = broadcastPreprocRatings.value
-      val userSlicePreProc = fromSliceToDense(preProc(user, 0 until nbItems).t)
-      val userSims = preProc * userSlicePreProc
-      userSims(user) = 0.0
-       return (user, argtopk(userSims, k).map(u2 => (u2, userSims(u2))))
-  }
-    
-      val topKs = sc.parallelize(0 until nbUsers).map(u => topK(k, u)).collect()
-      // freeing memory
-      broadcastPreprocRatings.destroy()
-      val topKSimsBuilder = new CSCMatrix.Builder[Double](nbUsers, nbUsers) 
-      topKs.foreach({case (u, topSims) => topSims.foreach({case (v, sim) => topKSimsBuilder.add(u, v, sim)})})
-      val topKSims = topKSimsBuilder.result()
 
     
     // denoms : denoms(u, i) = sum for all the items v that rated i of |s(u, v)|
-    val denoms = abs(topKSims) * mask
+    val denoms = (abs(topKSims) * mask) 
     val nums = topKSims * devs 
 
-
+    
     var userItemDevBuilder = new CSCMatrix.Builder[Rate](rows=nbUsers, cols=nbItems)
-
     nums.activeIterator.foreach({case ((uId, iId), num) => {
         userItemDevBuilder.add(uId, iId, num / denoms(uId, iId).toDouble)
     }})
 
     val userItemDevs = userItemDevBuilder.result()
-
     val userItemPairs = for(uId <- 0 until train.rows; iId <- 0 until train.cols) yield (uId, iId)
 
     
@@ -289,6 +386,7 @@ package object predictions
     
     val predictions = predictionsBuilder.result()
     
+
     return ((uId : UserId, iId : ItemId) => {
       val out = predictions(uId, iId)
       if(userCounts(uId, 0) == 0){
@@ -297,7 +395,6 @@ package object predictions
         out
       }
     }, topKSims)
-
       
 
 
