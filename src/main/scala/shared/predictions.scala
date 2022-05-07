@@ -203,6 +203,16 @@ package object predictions
     
     val itemAvgDev = (sumAlongAxis(devs, axis=0).t /:/ itemCounts.t).t
 
+
+        for(i <- 0 until 5){
+      for(j <- 0 until 5){
+        val res = userItemDevs(i,j)
+        val sim = sims(i,j)
+        println(s"user $i item $j itemavgdev $res sim $sim")
+      }
+    }
+
+
     return ((uId : UserId, iId : ItemId) => {
       val out = predictions(uId, iId)
       if(userCounts(uId, 0) == 0){
@@ -319,7 +329,7 @@ package object predictions
     val itemAvgDev = (sumAlongAxis(devs, axis=0).t /:/ itemCounts.t).t
 
     return ((uId : UserId, iId : ItemId) => {
-      val out = predictions(uId, iId)
+      val out = predictions(uId, iId) 
       if(userCounts(uId, 0) == 0){
         defaultValue
       } else {
