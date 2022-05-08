@@ -316,13 +316,133 @@ package object predictions
 
   }
 
-
-
-
-
-
-
     // END OF PART 2 ///////////////////////////////////////////
+
+  // PART 3 ///////////////////////////////////////////
+
+  def usersToPartitions(nbUsers:Int, partitionedUsers: Seq[Set[Int]]): Map[Int,Set[Int]] = {
+
+    val userToPartitions = collection.mutable.Map[Int, Set[Int]]()
+
+    for(user <- 0 until nbUsers){
+
+      val partitions = Set.newBuilder[Int]
+      for( i <- 0 until partitionedUsers.length){
+
+        if(partitionedUsers(i).contains(user)){
+          partitions += i
+        }
+      }
+
+      userToPartitions += (user -> partitions.result())
+  }
+
+    return userToPartitions.toMap
+  }
+
+  def preprocessRatingsPartitioned(train: CSCMatrix[Double],usersAverage: CSCMatrix[Double], partitionedUsers: Seq[Set[Int]]): (List[CSCMatrix[Double]], CSCMatrix[Double]) = {
+  
+    
+    val nbUsers = train.rows
+    val nbItems = train.cols
+    val nbPartitions = partitionedUsers.length
+
+
+        // compute the deviations r(u, i)^ = (r(u, i)  - ravg(u)) / scale(r(u, i), ravg(u))
+    var preScaleBuilder = new CSCMatrix.Builder[Rate](rows=nbUsers, cols=nbItems)
+
+    train.activeIterator.foreach({case ((uId, iId), r) => {
+      val uAverage = usersAverage(uId, 0)
+      val scaling = scale(r, uAverage)
+      preScaleBuilder.add(uId, iId, (r - uAverage) / scaling.toDouble)
+
+    }})
+    val devs = preScaleBuilder.result()
+      // compute the preprocessed ratings r~(u, i) = r(u, i)^ / sqrt(sum(all the items rated by one user r^(u, j) squared ))
+    //val norms = sqrt(sumAlongAxis(devs :* devs, axis=1))
+    val norms = sqrt((devs *:* devs) * DenseVector.ones[Double](devs.cols))
+
+
+
+
+    val listPreprocRatings = (0 until nbPartitions).map(x => new CSCMatrix.Builder[Rate](rows=nbUsers, cols=nbItems)).toList
+
+    val userToPartitions = usersToPartitions(nbUsers, partitionedUsers)
+    
+    devs.activeIterator.foreach({case ((uId, iId), r) => {
+
+      // filling the preprocratings only with the assigned users for each partitions
+      for(partitionNumber <-  userToPartitions(uId)){
+
+        listPreprocRatings(partitionNumber).add(uId, iId, r / norms(uId))
+
+      }
+    }})
+    
+
+    return (listPreprocRatings.map(builder => builder.result()), devs)
+  }
+
+  def keepTopKInList(listOfSims:List[(Int,Double)], k:Int): List[(Int,Double)] = {
+
+    // use negative sim to sort by ascending order
+    return listOfSims.sortBy({case (vId, sim) => -sim}).take(k)
+  }
+
+  def computeApproximateSimilarities(listPreprocRatings : List[CSCMatrix[Double]], k:Int): CSCMatrix[Double] = {
+
+        val nbUsers = listPreprocRatings(0).rows
+
+        val topKSimsBuilder = new CSCMatrix.Builder[Double](nbUsers, nbUsers) 
+
+        val userTopKSimsMap =  collection.mutable.Map[Int, List[(Int,Double)]]()
+
+
+        for( preprocRatings <- listPreprocRatings){
+        
+        val sims = preprocRatings * preprocRatings.t
+
+        // settings similarity to zero
+        for (uId <- 0 until nbUsers){
+          sims(uId,uId) = 0.0
+        }
+
+        // keep only the topKSims for each users
+        val tops = argtopk(sims.toDense(::, *), k)
+
+        for (uId <- 0 until nbUsers){
+            // concatenate current top K simimlarities with the new K similarities and keeping the best
+            val newTopKSims = tops(uId).map(vId => (vId, sims(uId,vId))).toList
+            val currentTopKSims = userTopKSimsMap.getOrElse(uId,List.empty[(Int,Double)])
+
+            userTopKSimsMap(uId) = keepTopKInList( currentTopKSims ::: newTopKSims , k)
+          }
+
+        }
+
+        for (uId <- 0 until nbUsers){
+            for((vId, sim) <- userTopKSimsMap(uId)){
+              topKSimsBuilder.add(uId,vId,sim)
+            }
+        }
+
+        return topKSimsBuilder.result()
+  } 
+
+
+
+    def ApproximateKNNPredictor(train : RateMatrix, k : Int, partitionedUsers : Seq[Set[Int]]) : (Predictor, RateMatrix) = { 
+
+    val (usersAverage, globalAverage) = globalAverageAndUsersAverage(train)
+    val (listPreprocRatings,devs) = preprocessRatingsPartitioned(train,usersAverage, partitionedUsers)
+    val topKSims = computeApproximateSimilarities(listPreprocRatings, k)
+
+    return ((uId : UserId, iId : ItemId) => predictKNN(uId, iId, train = train, topKSims = topKSims, usersAverage =  usersAverage, devs= devs, globalAverage ), topKSims)
+
+  }
+
+  // END OF PART 3 ///////////////////////////////////////////
+    
 
   def timingInMs(f : ()=>Double ) : (Double, Double) = {
     val start = System.nanoTime() 
@@ -365,7 +485,7 @@ package object predictions
   }
 
   def loadSpark(sc : org.apache.spark.SparkContext,  path : String, sep : String, nbUsers : Int, nbMovies : Int) : CSCMatrix[Double] = {
-    val ratings = loadSparkRDD(sc, path,sep)collect()
+    val ratings = loadSparkRDD(sc, path,sep).collect()
 
     val builder = new CSCMatrix.Builder[Double](rows=nbUsers, cols=nbMovies)
     for ((k,v) <- ratings) {
@@ -402,6 +522,7 @@ package object predictions
         return ratings
 
   }
+
 
   def partitionUsers (nbUsers : Int, nbPartitions : Int, replication : Int) : Seq[Set[Int]] = {
     val r = new scala.util.Random(1337)
