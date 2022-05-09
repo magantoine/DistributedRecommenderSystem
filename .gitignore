@@ -10,3 +10,8 @@ src/main/scala/project/
 src/main/scala/target/
 target/
 logs/
+.metals/
+.vscode/
+metals.sbt
+**/*.bloop
+data/ml-1m

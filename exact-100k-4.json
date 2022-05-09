@@ -2,21 +2,23 @@
     "Meta": {
         "train": "data/ml-100k/u2.base",
         "test": "data/ml-100k/u2.test",
+        "k": 10,
         "users": 943,
         "movies": 1682,
-        "master": "local[1]",
+        "master": "local[4]",
+        "num-executors": "",
         "num_measurements": 1
     },
-    "BR.1": {
-        "1.k10u1v1": 0,
-        "2.k10u1v864": 0.24232304952129605,
-        "3.k10u1v886": 0,
+    "EK.1": {
+        "1.knn_u1v1": 0,
+        "2.knn_u1v864": 0.24232304952129619,
+        "3.knn_u1v886": 0,
         "4.PredUser1Item1": 4.319093503763853,
         "5.PredUser327Item2": 2.6994178006921192,
         "6.Mae": 0.8287277961963542
     },
-    "BR.2": {
-        "average (ms)": 1194.75275,
-        "stddev (ms)": 146.13995
+    "EK.2": {
+        "average (ms)": 227.3723,
+        "stddev (ms)": 23.881100000000004
     }
 }

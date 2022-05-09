@@ -32,24 +32,29 @@ class ExactTests extends AnyFunSuite with BeforeAndAfterAll {
    // the corresponding application.
    // Add assertions with the answer you expect from your code, up to the 4th
    // decimal after the (floating) point, on data/ml-100k/u2.base (as loaded above).
+
+    beforeAll()
+
+    val (predictions, sims) = SparkKNNPredictor(train2, 10, sc)
+
    test("kNN predictor with k=10") { 
 
      // Similarity between user 1 and itself
-     assert(within(1.0, 0.0, 0.0001))
+     assert(within(sims(0,0), 0.0, 0.0001))
  
      // Similarity between user 1 and 864
-     assert(within(1.0, 0.0, 0.0001))
+     assert(within(sims(0,863),0.24232304952129619 , 0.0001))
 
      // Similarity between user 1 and 886
-     assert(within(1.0, 0.0, 0.0001))
+     assert(within(sims(0,885), 0.0, 0.0001))
 
      // Prediction user 1 and item 1
-     assert(within(1.0, 0.0, 0.0001))
+     assert(within(predictions(0,0), 4.319093503763853, 0.0001))
 
      // Prediction user 327 and item 2
-     assert(within(1.0, 0.0, 0.0001))
+     assert(within(predictions(326,1), 2.6994178006921192, 0.0001))
 
-     // MAE on test
-     assert(within(1.0, 0.0, 0.0001)) 
+     // MAE on test2
+     assert(within(computeMAE(test2, predictions), 0.8287277961963556, 0.0001)) 
    } 
 }
