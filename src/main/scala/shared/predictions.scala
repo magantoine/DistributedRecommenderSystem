@@ -191,26 +191,6 @@ package object predictions
 
     val itemRatings = train(0 until nbUsers, item).toDenseVector.map(x=> if(x!= 0.0) 1.0  else 0.0) 
 
-<<<<<<< HEAD
-
-        for(i <- 0 until 5){
-      for(j <- 0 until 5){
-        val res = userItemDevs(i,j)
-        val sim = sims(i,j)
-        println(s"user $i item $j itemavgdev $res sim $sim")
-      }
-    }
-
-
-    return ((uId : UserId, iId : ItemId) => {
-      val out = predictions(uId, iId)
-      if(userCounts(uId, 0) == 0){
-        defaultValue
-      } else {
-        out
-      }
-    }, topKSims)
-=======
     val denom = itemRatings.t * abs(topKSims(user, 0 until nbUsers).t.toDenseVector)
     val num =   topKSims(user, 0 until nbUsers) * devs(0 until nbUsers, item)
 
@@ -273,7 +253,6 @@ package object predictions
 
 
     return ((uId : UserId, iId : ItemId) => predictKNN(uId, iId, train = train, topKSims = topKSims, usersAverage =  usersAverage, devs= devs, globalAverage ), topKSims)
->>>>>>> refactor_breeze
 
   }
 
