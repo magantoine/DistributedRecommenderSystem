@@ -51,7 +51,6 @@ class ApproximateTests extends AnyFunSuite with BeforeAndAfterAll {
 
      // Similarity between user 1 and 344
      assert(within(sims(0,343), 0.2365936438851098 , 0.0001))
-
      // Similarity between user 1 and 16
      assert(within(sims(0,15), 0.0, 0.0001))
 
