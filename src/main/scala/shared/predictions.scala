@@ -100,8 +100,7 @@ package object predictions
     return (usersAverage, globalAverage)
   }
 
-  def preprocessRatings(train: CSCMatrix[Double], usersAverage: CSCMatrix[Double]): (CSCMatrix[Double], CSCMatrix[Double]) = {
-
+  def computeNormalizedDeviations(train:CSCMatrix[Double], usersAverage:CSCMatrix[Double]): CSCMatrix[Double] = {
     val nbUsers = train.rows
     val nbItems = train.cols
 
@@ -115,6 +114,17 @@ package object predictions
 
     }})
     val devs = preScaleBuilder.result()
+
+    return devs
+  }
+
+  def preprocessRatings(train: CSCMatrix[Double], usersAverage: CSCMatrix[Double]): (CSCMatrix[Double], CSCMatrix[Double]) = {
+
+    val nbUsers = train.rows
+    val nbItems = train.cols
+
+
+    val devs = computeNormalizedDeviations(train,usersAverage)
 
     // compute the preprocessed ratings r~(u, i) = r(u, i)^ / sqrt(sum(all the items rated by one user r^(u, j) squared ))
     //val norms = sqrt(sumAlongAxis(devs :* devs, axis=1))
@@ -349,16 +359,7 @@ package object predictions
     val nbPartitions = partitionedUsers.length
 
 
-        // compute the deviations r(u, i)^ = (r(u, i)  - ravg(u)) / scale(r(u, i), ravg(u))
-    var preScaleBuilder = new CSCMatrix.Builder[Rate](rows=nbUsers, cols=nbItems)
-
-    train.activeIterator.foreach({case ((uId, iId), r) => {
-      val uAverage = usersAverage(uId, 0)
-      val scaling = scale(r, uAverage)
-      preScaleBuilder.add(uId, iId, (r - uAverage) / scaling.toDouble)
-
-    }})
-    val devs = preScaleBuilder.result()
+    val devs = computeNormalizedDeviations(train,usersAverage)
       // compute the preprocessed ratings r~(u, i) = r(u, i)^ / sqrt(sum(all the items rated by one user r^(u, j) squared ))
     //val norms = sqrt(sumAlongAxis(devs :* devs, axis=1))
     val norms = sqrt((devs *:* devs) * DenseVector.ones[Double](devs.cols))
@@ -445,35 +446,12 @@ package object predictions
 
 /// SPARK FOR PART 3 ///
 
-  def preProcessRatingsForPartition(train:CSCMatrix[Double], partition:Set[Int], usersAverage:CSCMatrix[Double]): (CSCMatrix[Double],CSCMatrix[Double]) = {
+  def preProcessRatingsForPartition(train:CSCMatrix[Double], partition:Set[Int], usersAverage:CSCMatrix[Double], devs:CSCMatrix[Double]): CSCMatrix[Double] = {
   
     val nbUsers = train.rows
     val nbItems = train.cols
 
-
-        // compute the deviations r(u, i)^ = (r(u, i)  - ravg(u)) / scale(r(u, i), ravg(u))
-    var preScaleBuilder = new CSCMatrix.Builder[Rate](rows=nbUsers, cols=nbItems)
-
-    train.activeIterator.foreach({case ((uId, iId), r) => {
-
-      if(partition.contains(uId)){
-        
-      val uAverage = usersAverage(uId, 0)
-      val scaling = scale(r, uAverage)
-      val dev = (r - uAverage) / scaling.toDouble
-        if(iId == 81 && uId == 750){
-          println(s"uid $uId iid $iId dev $dev ")
-        }
-        
-      preScaleBuilder.add(uId, iId, dev)
-      }
-
-      }
-    })
-
-
-    val devs = preScaleBuilder.result()
-      // compute the preprocessed ratings r~(u, i) = r(u, i)^ / sqrt(sum(all the items rated by one user r^(u, j) squared ))
+    // compute the preprocessed ratings r~(u, i) = r(u, i)^ / sqrt(sum(all the items rated by one user r^(u, j) squared ))
     //val norms = sqrt(sumAlongAxis(devs :* devs, axis=1))
     val norms = sqrt((devs *:* devs) * DenseVector.ones[Double](devs.cols))
 
@@ -490,25 +468,30 @@ package object predictions
     }})
     
 
-    return (preprocRatingsBuilder.result(), devs)
+    return preprocRatingsBuilder.result()
     
   } 
 
 
-  def computeApproximateSparkSimilaritiesAndDevs(train: CSCMatrix[Double], k:Int, sc:SparkContext , partitionedUsers: Seq[Set[Int]], usersAverage: CSCMatrix[Double]): (CSCMatrix[Double],CSCMatrix[Double]) = {
+  def computeApproximateSparkSimilarities(train: CSCMatrix[Double], k:Int, sc:SparkContext , partitionedUsers: Seq[Set[Int]], usersAverage: CSCMatrix[Double]): (CSCMatrix[Double],CSCMatrix[Double]) = {
 
       val nbPartitions = partitionedUsers.length
       val nbUsers = train.rows
       val nbItems = train.cols
 
+
+      // broadcasting important variables
       val broadcastPartitions = sc.broadcast(partitionedUsers)
+      val devs = computeNormalizedDeviations(train,usersAverage)
+      val broadcastDevs = sc.broadcast(devs)
 
 
     // returns the list containing for each user the top K similarities for this given partition
-    def topKSimsForPartitionAndDevs(partitionNumber:Int): (List[List[(Int,Double)]], CSCMatrix[Double]) = {
+    // SPARK PROCEDURE
+    def topKSimsForPartitionAndDevs(partitionNumber:Int): List[List[(Int,Double)]] = {
 
       val currPartition = broadcastPartitions.value(partitionNumber)
-      val (preprocRatings, devs) = preProcessRatingsForPartition(train, currPartition, usersAverage = usersAverage)
+      val preprocRatings = preProcessRatingsForPartition(train, currPartition, usersAverage = usersAverage, devs =  broadcastDevs.value)
 
       val sims = preprocRatings * preprocRatings.t
 
@@ -527,7 +510,7 @@ package object predictions
 
           }
 
-          return (topKSims.result(),devs)
+          return topKSims.result()
 
     }
     
@@ -535,22 +518,12 @@ package object predictions
 
       val userTopKSimsMap =  collection.mutable.Map[Int, List[(Int,Double)]]()
 
-      // quickly building the final devs because we need them for the lazy evaluation later
-      val finalDevs = new CSCMatrix.Builder[Rate](rows=nbUsers, cols=nbItems)
-
-      for(partitionNumber <- 0 until nbPartitions){
-
-        for(((uId, iId), dev) <- listOfTopKsAndDevs(partitionNumber)._2.activeIterator ){
-            finalDevs.add(uId,iId,dev)
-        }
-      
-      }
 
 
       // building the topKSims
             
       for(partitionNumber <- 0 until nbPartitions){
-        val partitionTopKSims = listOfTopKsAndDevs(partitionNumber)._1
+        val partitionTopKSims = listOfTopKsAndDevs(partitionNumber)
 
         for (uId <- 0 until nbUsers){
             // concatenate current top K simimlarities with the new K similarities and keeping the best
@@ -573,17 +546,15 @@ package object predictions
         }
       }
 
-      return (topKSimsBuilder.result(),finalDevs.result())
+      return (topKSimsBuilder.result(),devs)
   }
 
 
   def ApproximateKNNSparkPredictor(train : RateMatrix, k : Int, partitionedUsers : Seq[Set[Int]], sc: SparkContext): (Predictor, RateMatrix) = { 
 
     val (usersAverage, globalAverage) = globalAverageAndUsersAverage(train)
-    val (topKSims,devs) = computeApproximateSparkSimilaritiesAndDevs(train, k, sc , partitionedUsers, usersAverage = usersAverage)
+    val (topKSims,devs) = computeApproximateSparkSimilarities(train, k, sc , partitionedUsers, usersAverage = usersAverage)
 
-    println(devs(726,81))
-    println(devs(750,81))
 
     return ((uId : UserId, iId : ItemId) => predictKNN(uId, iId, train = train, topKSims = topKSims, usersAverage =  usersAverage, devs= devs, globalAverage ), topKSims)
 
