@@ -8,22 +8,22 @@
         "master": "local[4]",
         "num-executors": "",
         "num_measurements": 1,
-        "partitions": 1,
-        "replication": 1
+        "partitions": 10,
+        "replication": 2
     },
     "AK.1": {
         "knn_u1v1": 0,
-        "knn_u1v864": 0.24232304952129605,
-        "knn_u1v344": 0.23659364388510987,
+        "knn_u1v864": 0,
+        "knn_u1v344": 0.2365936438851098,
         "knn_u1v16": 0,
-        "knn_u1v334": 0,
+        "knn_u1v334": 0.19282239907090362,
         "knn_u1v2": 0
     },
     "AK.2": {
-        "mae": 0.8287277961963542
+        "mae": 0.8442713942674099
     },
     "AK.3": {
-        "average (ms)": 6466.2957,
+        "average (ms)": 6640.087,
         "stddev (ms)": 0
     }
 }
