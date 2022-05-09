@@ -64,11 +64,16 @@ object Approximate {
       conf.partitions(), 
       conf.replication()
     )
+
+    val (predictions, sims) = ApproximateKNNPredictor(train, 10, partitionedUsers)
+
+ 
     val measurements = (1 to scala.math.max(1,conf.num_measurements()))
       .map(_ => timingInMs( () => {
-      // Use partitionedUsers here
-      0.0
+      computeMAE(test, predictions)
     }))
+
+
     val mae = measurements(0)._1
     val timings = measurements.map(_._2)
 
@@ -100,12 +105,12 @@ object Approximate {
             "replication" -> ujson.Num(conf.replication()) 
           ),
           "AK.1" -> ujson.Obj(
-            "knn_u1v1" -> ujson.Num(0.0),
-            "knn_u1v864" -> ujson.Num(0.0),
-            "knn_u1v344" -> ujson.Num(0.0),
-            "knn_u1v16" -> ujson.Num(0.0),
-            "knn_u1v334" -> ujson.Num(0.0),
-            "knn_u1v2" -> ujson.Num(0.0)
+            "knn_u1v1" -> ujson.Num(sims(0,0)),
+            "knn_u1v864" -> ujson.Num(sims(0,863)),
+            "knn_u1v344" -> ujson.Num(sims(0,343)),
+            "knn_u1v16" -> ujson.Num(sims(0,15)),
+            "knn_u1v334" -> ujson.Num(sims(0,333)),
+            "knn_u1v2" -> ujson.Num(sims(0,1))
           ),
           "AK.2" -> ujson.Obj(
             "mae" -> ujson.Num(mae) 

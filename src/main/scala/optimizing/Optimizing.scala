@@ -47,6 +47,8 @@ object Optimizing extends App {
 
 
     val (predictions, sims) = kNNPredictor(train, 10)
+
+    println("KNN and predicitons computed")
     println(s"The MAE for 10NN is: ${computeMAE(test, predictions)}")
     
 
@@ -101,5 +103,6 @@ object Optimizing extends App {
     }
 
     println("")
+    spark.stop()
 } 
 }

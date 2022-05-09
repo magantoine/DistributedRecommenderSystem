@@ -41,25 +41,26 @@ class ApproximateTests extends AnyFunSuite with BeforeAndAfterAll {
       2 
     )
 
+    val (predictions, sims) = ApproximateKNNPredictor(train2, 10, partitionedUsers)
+
      // Similarity between user 1 and itself
-     assert(within(1.0, 0.0, 0.0001))
+     assert(within(sims(0,0), 0.0, 0.0001))
  
      // Similarity between user 1 and 864
-     assert(within(1.0, 0.0, 0.0001))
+     assert(within(sims(0,863), 0.0, 0.0001))
 
      // Similarity between user 1 and 344
-     assert(within(1.0, 0.0, 0.0001))
-
+     assert(within(sims(0,343), 0.2365936438851098 , 0.0001))
      // Similarity between user 1 and 16
-     assert(within(1.0, 0.0, 0.0001))
+     assert(within(sims(0,15), 0.0, 0.0001))
 
      // Similarity between user 1 and 334
-     assert(within(1.0, 0.0, 0.0001))
+     assert(within(sims(0,333), 0.19282239907090362, 0.0001))
 
      // Similarity between user 1 and 2
-     assert(within(1.0, 0.0, 0.0001))
+     assert(within(sims(0,1), 0.0, 0.0001))
 
      // MAE on test
-     assert(within(1.0, 0.0, 0.0001))
+     assert(within(computeMAE(test2, predictions), 0.8442713942674099, 0.0001))
    } 
 }
