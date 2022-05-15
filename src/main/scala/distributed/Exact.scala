@@ -65,8 +65,10 @@ object Exact {
     println(s"The MAE for 10NN is: ${computeMAE(test, predictions)}")
 
     val timings = getTimings(() => {
-      val (predictor10, sims) = SparkKNNPredictor(train, 10, sc)
-      predictor10(1, 1)
+      val (predictor300, sims) = SparkKNNPredictor(train, 300, sc)
+      val mae = computeMAE(test, predictor300)
+      println(s"MAE is : ${mae}")
+      mae
       }, conf.num_measurements())
 
     // Save answers as JSON
