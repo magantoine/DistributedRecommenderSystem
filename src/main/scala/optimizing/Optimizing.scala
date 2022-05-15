@@ -70,7 +70,7 @@ object Optimizing extends App {
     println("loaded test")
 
 
-    val (predictions, sims) = kNNPredictor(train, 10)
+    val (predictions, sims) = kNNPredictor(train, 300)
 
     println("KNN and predicitons computed")
     println(s"The MAE for 10NN is: ${computeMAE(test, predictions)}")
@@ -80,7 +80,7 @@ object Optimizing extends App {
 
     val timings = getTimings(() => {
       println("Computing predictor 300")
-      val (predictor300, sims) = kNNPredictor(train, 10)
+      val (predictor300, sims) = kNNPredictor(train, 300)
       val mae = computeMAE(test, predictor300)
       println(s"MAE = ${mae}")
       mae
