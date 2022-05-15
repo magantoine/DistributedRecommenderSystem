@@ -46,7 +46,7 @@ object Optimizing extends App {
     val test = loadSpark(sc, conf.test(), conf.separator(), conf.users(), conf.movies())
 
 
-    val (predictions, sims) = kNNPredictor(train, 10)
+    val (predictions, sims) = kNNPredictor(train, 300)
 
     println("KNN and predicitons computed")
     println(s"The MAE for 10NN is: ${computeMAE(test, predictions)}")

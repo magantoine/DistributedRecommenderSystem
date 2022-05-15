@@ -65,17 +65,28 @@ object Approximate {
       conf.replication()
     )
 
-    val (predictions, sims) = ApproximateKNNSparkPredictor(train, 10, partitionedUsers, sc = sc)
+    val (predictions, sims) = ApproximateKNNSparkPredictor(train, conf.k(), partitionedUsers, sc = sc)
 
  
-    val measurements = (1 to scala.math.max(1,conf.num_measurements()))
-      .map(_ => timingInMs( () => {
-      computeMAE(test, predictions)
-    }))
+    // val measurements = (1 to scala.math.max(1,conf.num_measurements()))
+    //   .map(_ => timingInMs( () => {
+    //   val predictor = ApproximateKNNSparkPredictor(train, conf.k(), partitionedUsers, sc = sc)
+    //   mae = computeMAE(test, predictor)
+    //   println(s"MAE = ${mae}")
+    //   mae
+    // }))
 
 
-    val mae = measurements(0)._1
-    val timings = measurements.map(_._2)
+    val timings = getTimings(() => {
+      val (predictorK, sims) = ApproximateKNNSparkPredictor(train, conf.k(),partitionedUsers, sc)
+      val mae = computeMAE(test, predictorK)
+      println(s"MAE = ${mae}")
+      mae
+      }, conf.num_measurements())
+
+
+    // val mae = measurements(0)._1
+    // val timings = measurements.map(_._2)
 
     // Save answers as JSON
     def printToFile(content: String,
@@ -113,7 +124,7 @@ object Approximate {
             "knn_u1v2" -> ujson.Num(sims(0,1))
           ),
           "AK.2" -> ujson.Obj(
-            "mae" -> ujson.Num(mae) 
+            "mae" -> ujson.Num(computeMAE(test, predictions)) 
           ),
           "AK.3" -> ujson.Obj(
             "average (ms)" -> ujson.Num(mean(timings)),
