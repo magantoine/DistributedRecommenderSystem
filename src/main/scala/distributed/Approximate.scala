@@ -65,7 +65,7 @@ object Approximate {
       conf.replication()
     )
 
-    val (predictions, sims) = ApproximateKNNPredictor(train, 10, partitionedUsers)
+    val (predictions, sims) = ApproximateKNNSparkPredictor(train, 10, partitionedUsers, sc = sc)
 
  
     val measurements = (1 to scala.math.max(1,conf.num_measurements()))

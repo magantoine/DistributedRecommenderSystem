@@ -41,7 +41,7 @@ class ApproximateTests extends AnyFunSuite with BeforeAndAfterAll {
       2 
     )
 
-    val (predictions, sims) = ApproximateKNNPredictor(train2, 10, partitionedUsers)
+    val (predictions, sims) = ApproximateKNNSparkPredictor(train2, 10, partitionedUsers, sc = sc)
 
      // Similarity between user 1 and itself
      assert(within(sims(0,0), 0.0, 0.0001))
