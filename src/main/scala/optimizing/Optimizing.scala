@@ -41,9 +41,33 @@ object Optimizing extends App {
     spark.sparkContext.setLogLevel("ERROR")
     val sc = spark.sparkContext
 
-    println("Loading training data from: " + conf.train())
+
+    // println("============= TEST MATMUL ================")
+    // val mat1Builder = new CSCMatrix.Builder[Rate](rows=2, cols=2)
+    // mat1Builder.add(0, 1, 2)
+    // mat1Builder.add(1, 0, 1)
+    // mat1Builder.add(0, 0, 1)
+    // mat1Builder.add(1, 1, 4)
+    // val mat1 = mat1Builder.result()
+
+    // val mat2Builder = new CSCMatrix.Builder[Rate](rows=2, cols=2)
+    // mat2Builder.add(0, 1, 3)
+    // mat2Builder.add(1, 0, 9)
+    // mat2Builder.add(0, 0, 3)
+    // mat2Builder.add(1, 1, 3)
+    // val mat2 = mat2Builder.result()
+
+
+    // print(mat1.activeIterator)
+    // println(" A @ B = ")
+    // println(matmul(mat1, mat2))
+    // println("Loading training data from: " + conf.train())
+    println("loading train")
     val train = loadSpark(sc, conf.train(), conf.separator(), conf.users(), conf.movies())
+    println("loaded train")
+    println("loading test")
     val test = loadSpark(sc, conf.test(), conf.separator(), conf.users(), conf.movies())
+    println("loaded test")
 
 
     val (predictions, sims) = kNNPredictor(train, 300)
@@ -55,8 +79,11 @@ object Optimizing extends App {
     
 
     val timings = getTimings(() => {
-      val (predictor10, sims) = kNNPredictor(train, 10)
-      predictor10(1, 1)
+      println("Computing predictor 300")
+      val (predictor300, sims) = kNNPredictor(train, 300)
+      val mae = computeMAE(test, predictor300)
+      println(s"MAE = ${mae}")
+      mae
       }, conf.num_measurements())
 
 

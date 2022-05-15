@@ -48,7 +48,7 @@ package object predictions
       }
     }
 
-    return if(axis == 1) m * multiplicator.result() else multiplicator.result() * m
+    return if(axis == 1) dot(m, multiplicator.result()) else dot(multiplicator.result(), m)
   }
 
 
@@ -71,6 +71,92 @@ package object predictions
    }
 
 
+
+  def mmReducer(productElements: ((Int, Int), Iterable[((Int, Int), Double)])): (Int, Int, Double) = {
+    val ((i, j), elems) = (productElements._1, productElements._2.toList)
+
+    val count = elems.groupBy(_._1._2).filter({case (idComputation, items) => items.toList.length == 2})
+    return (i, j, count.foldLeft(0.0)({case (acc, (idComputation, items)) => acc + items.toList(0)._2 * items.toList(1)._2}))
+  }
+
+  def mmMapper(N: Int, M : Int, index: ((Int, Int), Double), matIndex : Int): List[((Int, Int), (Int, Int), Double)] = {
+    // for each index of the final matrix we want to find the list of index 
+    // we need to make the multiplication.
+
+    // href : https://lendap.wordpress.com/2015/02/16/matrix-multiplication-with-mapreduce/
+    
+    val ((i, j), value) = index // index we want obtain
+
+    if(matIndex == 0){
+      return ((0 until N) map {k => ((k, j), (0, i), value)}).toList
+    } else {
+      return ((0 until M) map {k => ((i, k), (1, j), value)}).toList
+    }
+  }
+
+
+  // def dot(a : RateMatrix, b : RateMatrix) : RateMatrix = {
+  //   val matrix = (b.activeIterator.flatMap(mmMapper(a.rows, b.cols, _, 0))) ++ (a.activeIterator.flatMap(mmMapper(a.rows, b.cols, _, 1)))
+  //   val matBuilder = new CSCMatrix.Builder[Rate](rows=a.rows, cols=b.cols)
+  //   matrix.toList
+  //     .groupBy(_._1)
+  //     .map({case ((x, y), ws) => mmReducer(((x, y), ws.map(x => (x._2, x._3))))})
+  //     .filter(_._3 != 0)
+  //     .foreach({case (x, y, z) => matBuilder.add(x, y, z)})
+  //   return matBuilder.result()
+
+  // }
+
+
+  // def dot(a : RateMatrix, b : RateMatrix) : RateMatrix = {
+  //   return a * b
+  // }
+  /**
+  Does a @ b
+  */
+  // def dot(a : RateMatrix, b : RateMatrix) : RateMatrix = {
+  //   assert(a.cols == b.rows)
+  //   var builder = new CSCMatrix.Builder[Rate](a.rows, b.cols)
+  //   for (u <- 0 until a.rows; v <- 0 until b.cols) {
+  //     // var value = 0.0
+  //     //value = a(u, 0 until a.cols) * b(0 until b.rows, v)
+  //     var ind = a.t(0 until a.cols, u).activeIterator.toList
+  //     ind = ind ++ b(0 until b.rows, v).activeIterator.toList.map({case ((x, y), z) => ((y, x), z)})
+  //     var value = ind.groupBy(x => x._1).filter({case (x, ws) => ws.length == 2}).map({case (x, ws) => ws(0)._2 * ws(1)._2}).reduce(_+_)
+  //     //var value = a.t(0 until a.cols, u).activeIterator.toList.(b(0 until b.rows, v).activeIterator.toList).foldLeft(0.0)({case (acc, (valA, valB)) => acc + valA._2 * valB._2})
+  //     if(value != 0){
+  //         builder.add(u, v, value)
+  //     }
+  //     // a.t(0 until a.cols, u).foreach(ui => {
+  //     //   b(0 until b.rows, v).foreach(vi => {
+  //     //     value += ui * vi
+  //     //     if(value != 0){
+  //     //     builder.add(u, v, value)
+  //     //     }        
+  //     //   })
+  //     // })
+  //   }
+  //   return builder.result()
+    
+  // }
+
+  def dot(a : RateMatrix, b : RateMatrix) : RateMatrix = {
+    assert(a.cols == b.rows)
+
+    var acc = new CSCMatrix.Builder[Rate](a.rows, b.cols).result()
+    
+    for (id <- 0 until a.cols){
+      // we iterate through all the columns
+      var vecA = SparseVector(a(0 until a.rows, id).toArray).asCSCMatrix
+      var vecB = SparseVector(b(id, 0 until b.cols).t.toArray).asCSCMatrix
+      // print(shape(vecA))
+      // print(shape(vecB))
+      acc = acc + vecA.t * vecB
+      
+    }
+
+    return acc
+  }
 
 
   def globalAverageAndUsersAverage(train: CSCMatrix[Double]): (CSCMatrix[Double], Double) = {
@@ -146,7 +232,7 @@ package object predictions
     val nbUsers = preprocRatings.rows
     val nbItems = preprocRatings.cols
     // compute the similarities, sum for all items j rated by both r~(u, j) * r~(v, j)
-    val sims = preprocRatings * preprocRatings.t
+    val sims = dot(preprocRatings, preprocRatings.t)
 
 
     // keep only the topKSims for each users
@@ -179,8 +265,8 @@ package object predictions
     
     val mask = maskBuilder.result()
 
-    val denoms = (abs(topKSims) * mask) 
-    val nums = topKSims * devs 
+    val denoms = dot(abs(topKSims),  mask) 
+    val nums = dot(topKSims, devs) 
 
     
     var userItemDevBuilder = new CSCMatrix.Builder[Rate](rows=nbUsers, cols=nbItems)
@@ -229,7 +315,7 @@ package object predictions
 
       else {
       // println(s"User $user Item $item userAverage $userAverage userItemAverageDev  $userItemAverageDev num_item_ratings  $num_item_ratings")
-      return userAverage + userItemAverageDev* scale(userAverage + userItemAverageDev, userAverage)
+      return userAverage + userItemAverageDev * scale(userAverage + userItemAverageDev, userAverage)
     }
     }
   }
@@ -402,7 +488,7 @@ package object predictions
 
         for( preprocRatings <- listPreprocRatings){
         
-        val sims = preprocRatings * preprocRatings.t
+        val sims = dot(preprocRatings, preprocRatings.t)
 
         // settings similarity to zero
         for (uId <- 0 until nbUsers){

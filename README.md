@@ -86,7 +86,7 @@ You should fill all tests and ensure they all succeed prior to submission.
 ### Optimizing
 
 ````
-sbt "runMain scaling.Optimizing --train data/ml-100k/u2.base --test data/ml-100k/u2.test --json optimizing-100k.json --users 943 --movies 1682"
+sbt "runMain scaling.Optimizing --train data/ml-100k/u2.base --test data/ml-100k/u2.test --json optimizing-100k.json --master local[1] --users 943 --movies 1682"
 ````
 
 ### Parallel Exact KNN

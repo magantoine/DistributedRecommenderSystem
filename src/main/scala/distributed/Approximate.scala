@@ -66,18 +66,9 @@ object Approximate {
     )
 
     val (predictions, sims) = ApproximateKNNSparkPredictor(train, conf.k(), partitionedUsers, sc = sc)
+    
 
- 
-    // val measurements = (1 to scala.math.max(1,conf.num_measurements()))
-    //   .map(_ => timingInMs( () => {
-    //   val predictor = ApproximateKNNSparkPredictor(train, conf.k(), partitionedUsers, sc = sc)
-    //   mae = computeMAE(test, predictor)
-    //   println(s"MAE = ${mae}")
-    //   mae
-    // }))
-
-
-    val timings = getTimings(() => {
+     val timings = getTimings(() => {
       val (predictorK, sims) = ApproximateKNNSparkPredictor(train, conf.k(),partitionedUsers, sc)
       val mae = computeMAE(test, predictorK)
       println(s"MAE = ${mae}")
@@ -85,8 +76,10 @@ object Approximate {
       }, conf.num_measurements())
 
 
+      val mae = computeMAE(test, predictions)
     // val mae = measurements(0)._1
     // val timings = measurements.map(_._2)
+
 
     // Save answers as JSON
     def printToFile(content: String,
