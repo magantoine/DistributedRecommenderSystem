@@ -1,5 +1,5 @@
 package shared
-
+import scala.collection.mutable 
 import breeze.linalg._
 import breeze.numerics._
 import scala.io.Source
@@ -149,8 +149,6 @@ package object predictions
       // we iterate through all the columns
       var vecA = SparseVector(a(0 until a.rows, id).toArray).asCSCMatrix
       var vecB = SparseVector(b(id, 0 until b.cols).t.toArray).asCSCMatrix
-      // print(shape(vecA))
-      // print(shape(vecB))
       acc = acc + vecA.t * vecB
       
     }
@@ -456,7 +454,8 @@ package object predictions
     val listPreprocRatings = (0 until nbPartitions).map(x => new CSCMatrix.Builder[Rate](rows=nbUsers, cols=nbItems)).toList
 
     val userToPartitions = usersToPartitions(nbUsers, partitionedUsers)
-    
+    print(userToPartitions)
+    /* MIGHT BE HERE, TRY GIVING THE */
     devs.activeIterator.foreach({case ((uId, iId), r) => {
 
       // filling the preprocratings only with the assigned users for each partitions
@@ -474,62 +473,10 @@ package object predictions
   def keepTopKInList(listOfSims:List[(Int,Double)], k:Int): List[(Int,Double)] = {
 
     // use negative sim to sort by ascending order
-    return listOfSims.sortBy({case (vId, sim) => -sim}).take(k)
+    return listOfSims.sortBy({case (vId, sim) => - sim}).take(k)
   }
 
-  def computeApproximateSimilarities(listPreprocRatings : List[CSCMatrix[Double]], k:Int): CSCMatrix[Double] = {
-
-        val nbUsers = listPreprocRatings(0).rows
-
-        val topKSimsBuilder = new CSCMatrix.Builder[Double](nbUsers, nbUsers) 
-
-        val userTopKSimsMap =  collection.mutable.Map[Int, List[(Int,Double)]]()
-
-
-        for( preprocRatings <- listPreprocRatings){
-        
-        val sims = dot(preprocRatings, preprocRatings.t)
-
-        // settings similarity to zero
-        for (uId <- 0 until nbUsers){
-          sims(uId,uId) = 0.0
-        }
-
-        // keep only the topKSims for each users
-        val tops = argtopk(sims.toDense(::, *), k)
-
-        for (uId <- 0 until nbUsers){
-            // concatenate current top K simimlarities with the new K similarities and keeping the best
-            val newTopKSims = tops(uId).map(vId => (vId, sims(uId,vId))).toList
-            val currentTopKSims = userTopKSimsMap.getOrElse(uId,List.empty[(Int,Double)])
-
-            userTopKSimsMap(uId) = keepTopKInList( currentTopKSims ::: newTopKSims , k)
-          }
-
-        }
-
-        for (uId <- 0 until nbUsers){
-            for((vId, sim) <- userTopKSimsMap(uId)){
-              topKSimsBuilder.add(uId,vId,sim)
-            }
-        }
-
-        return topKSimsBuilder.result()
-  } 
-
-
-
-  def ApproximateKNNPredictor(train : RateMatrix, k : Int, partitionedUsers : Seq[Set[Int]]) : (Predictor, RateMatrix) = { 
-
-    val (usersAverage, globalAverage) = globalAverageAndUsersAverage(train)
-    val (listPreprocRatings,devs) = preprocessRatingsPartitioned(train,usersAverage, partitionedUsers)
-    val topKSims = computeApproximateSimilarities(listPreprocRatings, k)
-
-    return ((uId : UserId, iId : ItemId) => predictKNN(uId, iId, train = train, topKSims = topKSims, usersAverage =  usersAverage, devs= devs, globalAverage ), topKSims)
-
-  }
-
-
+  
 /// SPARK FOR PART 3 ///
 
   def preProcessRatingsForPartition(train:CSCMatrix[Double], partition:Set[Int], usersAverage:CSCMatrix[Double], devs:CSCMatrix[Double]): CSCMatrix[Double] = {
@@ -565,38 +512,43 @@ package object predictions
       val nbUsers = train.rows
       val nbItems = train.cols
 
-
+    //println(s"check :${partitionedUsers(0).equals(partitionedUsers(1))}")
+    println(s"length of the partition : ${partitionedUsers(0).size}")
+    
       // broadcasting important variables
       val broadcastPartitions = sc.broadcast(partitionedUsers)
       val devs = computeNormalizedDeviations(train,usersAverage)
       val broadcastDevs = sc.broadcast(devs)
-
+      
 
     // returns the list containing for each user the top K similarities for this given partition
     // SPARK PROCEDURE
-    def topKSimsForPartitionAndDevs(partitionNumber:Int): List[List[(Int,Double)]] = {
+    def topKSimsForPartitionAndDevs(partitionNumber:Int): mutable.Map[UserId, List[(UserId, Double)]] = {
 
       val currPartition = broadcastPartitions.value(partitionNumber)
-      val preprocRatings = preProcessRatingsForPartition(train, currPartition, usersAverage = usersAverage, devs =  broadcastDevs.value)
+
+      // why here and not preprocessed ? ==> not all devs ??
+      //val preprocRatings = preprocessRatings(train,usersAverage)
+      val preprocRatings = preProcessRatingsForPartition(train, currPartition, usersAverage=usersAverage, devs=broadcastDevs.value)
 
       val sims = preprocRatings * preprocRatings.t
 
-        // settings similarity to zero
-        for (uId <- 0 until nbUsers){
-          sims(uId,uId) = 0.0
-        }
+      // settings similarity to zero
+      
 
-      val tops = argtopk(sims.toDense(::, *), k)
+      val tops = argtopk(sims.toDense(::, *), k + 1) 
 
-      val topKSims = List.newBuilder[List[(Int,Double)]]
+      
+      var topKSims = mutable.Map[UserId, List[(UserId, Double)]]()
 
-      for (uId <- 0 until nbUsers){
+      // DO NOT ITERATE THROUGH THE WHOLE USERS BUT JUST THE PARTITION
+      for (uId <- currPartition){
             // concatenate current top K simimlarities with the new K similarities and keeping the best
-            topKSims += tops(uId).map(vId => (vId, sims(uId,vId))).toList
-
+            topKSims += (uId -> tops(uId).filter(_ != uId).map(vId => (vId, sims(uId,vId))).toList)
           }
 
-          return topKSims.result()
+      
+      return topKSims
 
     }
     
@@ -604,14 +556,12 @@ package object predictions
 
       val userTopKSimsMap =  collection.mutable.Map[Int, List[(Int,Double)]]()
 
-
-
       // building the topKSims
             
       for(partitionNumber <- 0 until nbPartitions){
         val partitionTopKSims = listOfTopKsAndDevs(partitionNumber)
 
-        for (uId <- 0 until nbUsers){
+        for (uId <- partitionedUsers(partitionNumber)){
             // concatenate current top K simimlarities with the new K similarities and keeping the best
             val newTopKSims = partitionTopKSims(uId)
             val currentTopKSims = userTopKSimsMap.getOrElse(uId,List.empty[(Int,Double)])
