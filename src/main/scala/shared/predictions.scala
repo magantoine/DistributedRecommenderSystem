@@ -554,11 +554,14 @@ package object predictions {
   // }
 //
   def keepTopKInList(
-      listOfSims: List[(Int, Double)],
+      listOfSims1: List[(Int, Double)],
+      listOfSims2: List[(Int, Double)],
       k: Int
   ): List[(Int, Double)] = {
 
     // use negative sim to sort by ascending order
+
+    val listOfSims = listOfSims1 ::: listOfSims2
 
     return listOfSims
       .groupBy(_._2)
@@ -623,7 +626,7 @@ package object predictions {
     // SPARK PROCEDURE
     def topKSimsForPartitionAndDevs(
         partitionNumber: Int
-    ): mutable.Map[UserId, List[(UserId, Double)]] = {
+    ): List[(UserId, List[(UserId, Double)])] = {
 
       val currPartition = broadcastPartitions.value(partitionNumber)
 
@@ -652,51 +655,25 @@ package object predictions {
           .toList)
       }
 
-      return topKSims
+      return topKSims.toList
 
     }
 
-    val listOfTopKsAndDevs = sc
+    val listOfTopKs = sc
       .parallelize(0 until nbPartitions)
-      .map(partitionNumber => topKSimsForPartitionAndDevs(partitionNumber))
+      .flatMap(partitionNumber => topKSimsForPartitionAndDevs(partitionNumber))
+      .reduceByKey({ case (listOfSims1, listOfSims2) =>
+        keepTopKInList(listOfSims1, listOfSims2, k)
+      })
       .collect()
-
-    val userTopKSimsMap = collection.mutable.Map[Int, List[(Int, Double)]]()
-
-    // building the topKSims
-
-    val set = Set(1, 2, 3, 4, 5)
-
-    for (partitionNumber <- 0 until nbPartitions) {
-      val partitionTopKSims = listOfTopKsAndDevs(partitionNumber)
-
-      for (uId <- partitionedUsers(partitionNumber)) {
-        // concatenate current top K simimlarities with the new K similarities and keeping the best
-        val newTopKSims = partitionTopKSims(uId)
-        val currentTopKSims =
-          userTopKSimsMap.getOrElse(uId, List.empty[(Int, Double)])
-        userTopKSimsMap(uId) =
-          keepTopKInList(currentTopKSims ::: newTopKSims, k)
-
-        if (set.contains(uId)) {
-          // println(s"UID ${uId}")
-          // println(s"newTopKSims UID ${uId} ${newTopKSims}")
-          // println(s"currentTopKSims UID ${uId} ${currentTopKSims}")
-          // println(s"userTopKSimsMap UID ${uId} ${userTopKSimsMap(uId)}")
-//
-        }
-
-      }
-    }
 
     val topKSimsBuilder = new CSCMatrix.Builder[Double](nbUsers, nbUsers)
 
-    for (u <- 0 until nbUsers) {
-      val topSims = userTopKSimsMap(u)
+    for ((uId, listOfSims) <- listOfTopKs) {
 
-      for ((v, suv) <- topSims) {
+      for ((v, suv) <- listOfSims) {
 
-        topKSimsBuilder.add(u, v, suv)
+        topKSimsBuilder.add(uId, v, suv)
       }
     }
 
