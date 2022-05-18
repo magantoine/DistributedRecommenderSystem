@@ -1,0 +1,29 @@
+{
+    "Meta": {
+        "train": "hdfs://iccluster028.iccluster.epfl.ch:8020/cs449/data/ml-100k/u2.base",
+        "test": "hdfs://iccluster028.iccluster.epfl.ch:8020/cs449/data/ml-100k/u2.test",
+        "k": 300,
+        "users": 943,
+        "movies": 1682,
+        "master": "yarn",
+        "num-executors": "10",
+        "num_measurements": 1,
+        "partitions": 10,
+        "replication": 5
+    },
+    "AK.1": {
+        "knn_u1v1": 0,
+        "knn_u1v864": 0.48464609904259226,
+        "knn_u1v344": 0.47318728777021957,
+        "knn_u1v16": 0,
+        "knn_u1v334": 0,
+        "knn_u1v2": 0
+    },
+    "AK.2": {
+        "mae": 0.8524745846403983
+    },
+    "AK.3": {
+        "average (ms)": 7048.987971,
+        "stddev (ms)": 0
+    }
+}
