@@ -60,16 +60,18 @@ object Exact {
     //val test = loadSparkRDD(sc, conf.test(), conf.separator()).map({case ((uid,iid),rate) => Rating(uid,iid,rate)})
 
     println("Creating KNN predictor ")
-    val (predictions, sims) = SparkKNNPredictor(train, conf.k(), sc)
+    // val (predictions, sims) = SparkKNNPredictor(train, conf.k(), sc)
 
-    println(s"The MAE for 10NN is: ${computeMAE(test, predictions)}")
+    // println(s"The MAE for 10NN is: ${computeMAE(test, predictions)}")
 
-    val timings = getTimings(() => {
+    val measurements_res = getTimings(() => {
       val (predictor300, sims) = SparkKNNPredictor(train, conf.k(), sc)
       val mae = computeMAE(test, predictor300)
       println(s"MAE is : ${mae}")
-      mae
+      (mae, sims, predictor300)
       }, conf.num_measurements())
+
+    val (timings, (mae, sims, predictions)) = measurements_res
 
     // Save answers as JSON
     def printToFile(content: String,

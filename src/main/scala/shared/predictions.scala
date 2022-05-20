@@ -154,6 +154,9 @@ package object predictions {
   def dot(a: RateMatrix, b: RateMatrix): RateMatrix = {
     assert(a.cols == b.rows)
 
+    // if(a.cols < 1000 && a.rows < 1000 && b.cols < 1000){
+    //   return a * b
+    // }
     var acc = new CSCMatrix.Builder[Rate](a.rows, b.cols).result()
 
     for (id <- 0 until a.cols) {
@@ -257,12 +260,36 @@ package object predictions {
     val nbUsers = preprocRatings.rows
     val nbItems = preprocRatings.cols
     // compute the similarities, sum for all items j rated by both r~(u, j) * r~(v, j)
-    val sims = dot(preprocRatings, preprocRatings.t)
+    println("computing sims")
+
+    // TESTING SOMETHIING HERE //
+    
+    
+    val sims = if(nbUsers < 1000) preprocRatings * preprocRatings.t else dot(preprocRatings, preprocRatings.t)
+    // val simsBuildos = new CSCMatrix.Builder[Rate](rows=nbUsers, cols=nbUsers)
+    // // for(userPair <- (0 until nbUsers).toList.combinations(2).toList){
+    // //   //val value = sumAlongAxis(preprocRatings(userPair, 0 until nbItems), axis=0).activeValuesIterator.sum
+    // //   val value = (preprocRatings(userPair(0), 0 until nbItems) :* preprocRatings(userPair(1), 0 until nbItems)).t.sum
+      
+    // //   simsBuildos.add(userPair(0), userPair(1), value)
+    // //   simsBuildos.add(userPair(1), userPair(0), value)
+    // // }
+      
+
+
+    
+    
+
 
     // keep only the topKSims for each users
     var topKSimsBuilder =
       new CSCMatrix.Builder[Rate](rows = nbUsers, cols = nbUsers)
-    val tops = argtopk(sims.toDense(::, *), k + 1)
+    println("computing topK")
+    // val tops = argtopk(sims.toDense(::, *), k + 1)
+    val tops = (0 until nbUsers).map(u => {
+        sims(0 until nbUsers, u).toDenseVector.argtopk(k + 1)})
+
+    println("filling topK")
     for (uId <- 0 until nbUsers) {
       for (vId <- tops(uId)) {
         if (uId != vId) {
@@ -375,8 +402,11 @@ package object predictions {
 
   def kNNPredictor(train: RateMatrix, k: Int): (Predictor, RateMatrix) = {
 
+    println("computing global average")
     val (usersAverage, globalAverage) = globalAverageAndUsersAverage(train)
+    println("computing preprocess ratings")
     val (preprocRatings, devs) = preprocessRatings(train, usersAverage)
+    println("computing top k sims")
     val topKSims = computeKTopSimilarites(preprocRatings, k)
 
     // val userItemDevs = userItemDeviations(train = train, devs = devs, topKSims =  topKSims)
@@ -628,30 +658,50 @@ package object predictions {
         partitionNumber: Int
     ): List[(UserId, List[(UserId, Double)])] = {
 
-      val currPartition = broadcastPartitions.value(partitionNumber)
+      val currPartition = broadcastPartitions.value(partitionNumber).toList.sorted
+      print(s"for partition ${partitionNumber} we have :")
+      val partToRealIndices = currPartition.zipWithIndex.map({case (realIndex, partIndex) => (partIndex -> realIndex)}).toMap
+      val realToPartIndices = currPartition.zipWithIndex.map({case (realIndex, partIndex) => (realIndex -> partIndex)}).toMap
 
+      println(s"getting preprocRatings ${partitionNumber}")
       // val preprocRatings = preprocessRatings(train,usersAverage)
       val preprocRatings = preProcessRatingsForPartition(
         train,
-        currPartition,
+        currPartition.toSet,
         usersAverage = usersAverage,
         devs = broadcastDevs.value
       )
 
-      val sims = preprocRatings * preprocRatings.t
+      // we build reduced preprocRatings Matrix
+      val reducedBuilder = new CSCMatrix.Builder[Rate](rows=currPartition.length, nbItems)
+      preprocRatings.activeIterator.foreach({ case ((uId, iId), v) => {
+        reducedBuilder.add(realToPartIndices(uId), iId, v)
+      }})
 
-      // settings similarity to zero
+      val reduced = reducedBuilder.result()
 
-      val tops = argtopk(sims.toDense(::, *), k + 1)
+
+      println(s"computing sims for partitions ${partitionNumber}")
+      val sims = dot(reduced, reduced.t)
+      
+
+      // // settings similarity to zero
+      // val expandedSims = expandedBuilder.result()
+      // println(s"getting topk for part ${partitionNumber}")
+      //val tops = argtopk(sims.toDense(::, *), min(k + 1, currPartition.length))
+      
+      val tops = currPartition.map(u => {
+        sims(0 until currPartition.length, realToPartIndices(u)).toDenseVector.argtopk(min(k + 1, currPartition.length))})
 
       var topKSims = mutable.Map[UserId, List[(UserId, Double)]]()
 
+      println(s" building final list for ${partitionNumber}")
       // DO NOT ITERATE THROUGH THE WHOLE USERS BUT JUST THE PARTITION
       for (uId <- currPartition) {
         // concatenate current top K simimlarities with the new K similarities and keeping the best
-        topKSims += (uId -> tops(uId)
-          .filter(_ != uId)
-          .map(vId => (vId, sims(uId, vId)))
+        topKSims += (uId -> tops(realToPartIndices(uId))
+          .filter(_ != realToPartIndices(uId))
+          .map(vId => (partToRealIndices(vId), sims(realToPartIndices(uId), vId)))
           .toList)
       }
 
@@ -659,23 +709,30 @@ package object predictions {
 
     }
 
-    val listOfTopKs = sc
-      .parallelize(0 until nbPartitions)
+    println(s">> merging <<")
+    val listOfTopKs = sc.parallelize(0 until nbPartitions)
       .flatMap(partitionNumber => topKSimsForPartitionAndDevs(partitionNumber))
       .reduceByKey({ case (listOfSims1, listOfSims2) =>
         keepTopKInList(listOfSims1, listOfSims2, k)
-      })
-      .collect()
+      }).collect()
+    
 
     val topKSimsBuilder = new CSCMatrix.Builder[Double](nbUsers, nbUsers)
 
-    for ((uId, listOfSims) <- listOfTopKs) {
-
+    listOfTopKs.foreach({ case (uId, listOfSims) => {
       for ((v, suv) <- listOfSims) {
 
         topKSimsBuilder.add(uId, v, suv)
+       }
       }
-    }
+    })
+    // for ((uId, listOfSims) <- listOfTopKs) {
+
+    //   for ((v, suv) <- listOfSims) {
+
+    //     topKSimsBuilder.add(uId, v, suv)
+    //   }
+    // }
 
     return (topKSimsBuilder.result(), devs)
   }
@@ -832,12 +889,21 @@ package object predictions {
     bins.values.toSeq.map(_.toSet)
   }
   def getTimings(
-      function: () => Double,
+      function: () => (Double, breeze.linalg.CSCMatrix[Double], (Int, Int) => Double),
       num_measurements: Int
-  ): Array[Double] = {
-    val res = for (i <- 0 to num_measurements) yield { timingInMs(function) }
+  ): (Array[Double], (Double, breeze.linalg.CSCMatrix[Double], (Int, Int) => Double)) = {
+    val res = for (i <- 0 until num_measurements) yield { timingInMsCustom(function) }
 
-    return res.toArray.map(_._2)
+    return (res.toArray.map(_._2), res(0)._1)
+  }
+
+
+  
+  def timingInMsCustom(f: () => (Double, breeze.linalg.CSCMatrix[Double], (Int, Int) => Double)): ((Double, breeze.linalg.CSCMatrix[Double], (Int, Int) => Double), Double) = {
+    val start = System.nanoTime()
+    val output = f()
+    val end = System.nanoTime()
+    return (output, (end - start) / 1000000.0)
   }
 
 }
